@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SAMI · Gestão</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root{
+    --paper:#F6F2EC; --ink:#211C18; --graphite:#5C554C; --line:#E3DACD;
+    --terracotta:#C1602E; --terracottaDark:#9C4A22;
+    --sage:#5C6E5A; --clay:#9C6B4F; --alert:#8B3A2B;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Inter',sans-serif;background:var(--paper);color:var(--ink);}
+  h1,h2,.display{font-family:'Space Grotesk',sans-serif;}
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  .hidden{display:none !important;}
+  button{cursor:pointer;font-family:inherit;}
+  input,select,textarea{font-family:inherit;font-size:14px;}
+
+  /* Config warning */
+  #configWarning{background:var(--alert);color:#fff;text-align:center;padding:10px 16px;font-size:13px;}
+
+  /* Login */
+  #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;}
+  .login-box{width:340px;}
+  .login-box input{width:100%;border:1px solid var(--line);background:#fff;padding:10px 12px;margin-top:6px;}
+  .field{margin-bottom:18px;}
+  .btn{font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.04em;background:var(--terracotta);color:var(--paper);border:none;padding:10px 14px;}
+  .btn:hover{background:var(--terracottaDark);}
+  .btn-ghost{background:none;border:none;color:var(--graphite);font-size:13px;padding:8px;}
+  .erro{color:var(--alert);font-size:13px;margin:0;}
+
+  /* App shell */
+  #appScreen{display:none;min-height:100vh;}
+  aside{width:220px;flex-shrink:0;border-right:1px solid var(--line);padding:28px 22px;display:flex;flex-direction:column;justify-content:space-between;position:sticky;top:0;height:100vh;}
+  .brand{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite);margin-bottom:32px;}
+  .navbtn{display:block;width:100%;text-align:left;background:none;border:none;padding:9px 10px;font-size:14px;color:var(--ink);border-radius:2px;margin-bottom:2px;}
+  .navbtn:hover{background:#fff;}
+  .navbtn.active{background:var(--terracotta);color:var(--paper);}
+  main{flex:1;padding:40px 48px;max-width:1300px;overflow-y:auto;}
+  h1{font-size:20px;font-weight:600;margin:0 0 24px;}
+
+  /* Generic */
+  .grid{display:grid;gap:18px;}
+  .cards4{grid-template-columns:repeat(4,1fr);}
+  .card{background:#fff;border:1px solid var(--line);padding:16px;}
+  .label{font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--graphite);margin:0 0 4px;}
+  .muted{color:var(--graphite);font-size:14px;}
+  .form-box{background:#fff;border:1px solid var(--line);padding:16px;max-width:420px;margin-bottom:16px;}
+  .form-box input,.form-box select{width:100%;border:1px solid var(--line);padding:8px 10px;margin-bottom:10px;}
+  .form-actions{display:flex;gap:8px;}
+  .badge{font-size:10px;padding:2px 6px;display:inline-block;margin:0 4px 4px 0;}
+  .badge.clay{background:rgba(156,107,79,.15);color:var(--clay);}
+  .badge.line{background:var(--line);color:var(--graphite);}
+  .badge.alert{background:rgba(139,58,43,.15);color:var(--alert);font-weight:600;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th{font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;color:var(--graphite);text-align:left;padding:8px 16px;border-bottom:1px solid var(--line);}
+  td{padding:9px 16px;border-bottom:1px solid var(--line);vertical-align:top;}
+  .pill{font-size:11px;padding:2px 6px;border:1px solid;white-space:nowrap;background:none;font-family:inherit;}
+  .remove-link{color:var(--graphite);font-size:11px;background:none;border:none;white-space:nowrap;}
+  .remove-link:hover{color:var(--alert);}
+
+  /* Projetos */
+  .proj-card{cursor:pointer;transition:border-color .15s;}
+  .proj-card:hover{border-color:var(--terracotta);}
+  .proj-title{font-size:15px;font-weight:600;margin:0 0 2px;font-family:'Space Grotesk',sans-serif;}
+  .proj-client{font-size:13px;color:var(--graphite);margin:0 0 14px;}
+  .bar{height:6px;background:var(--line);overflow:hidden;}
+  .bar > div{height:100%;background:var(--terracotta);}
+  .barcaption{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--graphite);margin-top:6px;}
+
+  /* Kanban */
+  .kanban{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;}
+  .col-label{font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;color:var(--graphite);margin-bottom:10px;}
+  .task-card{background:#fff;border:1px solid var(--line);padding:12px;margin-bottom:12px;}
+  .task-card.atrasada{border-color:var(--alert);}
+  .task-title{font-size:13.5px;font-weight:500;margin:0;flex:1;}
+  .timer-btn{width:100%;font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;padding:6px;border:none;cursor:pointer;background:rgba(92,110,90,.15);color:var(--sage);margin-bottom:8px;}
+  .timer-btn.running{background:rgba(139,58,43,.1);color:var(--alert);}
+  .move-row{display:flex;gap:4px;}
+  .move-row button{flex:1;font-size:9.5px;border:1px solid var(--line);color:var(--graphite);background:none;padding:5px;}
+  .alertbox{border:1px solid rgba(139,58,43,.4);background:rgba(139,58,43,.08);padding:12px 16px;margin-bottom:24px;}
+  .alertbox .label{color:var(--alert);}
+  .alertbox li{font-size:13.5px;margin-bottom:2px;}
+  .chip-select{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
+  .chip{font-size:11px;padding:4px 8px;border:1px solid var(--line);color:var(--graphite);background:none;}
+  .chip.on{background:var(--terracotta);color:var(--paper);border-color:var(--terracotta);}
+
+  /* Início */
+  .hero{background:var(--terracotta);color:var(--paper);padding:32px;display:flex;flex-direction:column;justify-content:space-between;}
+  .hero .time{font-family:'Space Grotesk',sans-serif;font-size:44px;font-weight:700;line-height:1;margin:8px 0;}
+  .cal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+  .cal-dow{font-family:'IBM Plex Mono',monospace;font-size:10px;text-align:center;color:var(--graphite);text-transform:uppercase;}
+  .cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12px;border-radius:2px;}
+  .cal-day.today{background:var(--terracotta);color:var(--paper);}
+  .cal-dot{width:4px;height:4px;border-radius:50%;background:var(--terracotta);margin-top:2px;}
+  .navbtn-cal{width:26px;height:26px;border:1px solid var(--line);color:var(--graphite);background:#fff;}
+  .compromisso{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);}
+  .compromisso:last-child{border-bottom:none;}
+  .compromisso .datebox{text-align:center;width:56px;flex-shrink:0;}
+  .compromisso .day{font-family:'Space Grotesk',sans-serif;font-size:17px;font-weight:700;color:var(--terracotta);line-height:1;}
+  .compromisso .mon{font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;color:var(--graphite);}
+  .compromisso-row{display:flex;gap:14px;align-items:center;}
+  .chartbox{background:#fff;border:1px solid var(--line);padding:16px;}
+</style>
+</head>
+<body>
+
+<div id="configWarning" class="hidden">
+  Configure SUPABASE_URL e SUPABASE_ANON_KEY no início do arquivo antes de usar.
+</div>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="login-box">
+    <p class="mono" style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--graphite);margin-bottom:8px;">SAMI · Arquitetura</p>
+    <h1 style="margin-bottom:28px;">Acesso da equipe</h1>
+    <form id="formLogin">
+      <div class="field">
+        <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">E-mail</label>
+        <input id="loginEmail" type="email" required placeholder="equipe@sami.arq" />
+      </div>
+      <div class="field">
+        <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Senha</label>
+        <input id="loginSenha" type="password" required placeholder="••••••••" />
+      </div>
+      <p id="loginErro" class="erro"></p>
+      <button type="submit" class="btn" style="width:100%;padding:11px;">Entrar</button>
+    </form>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="appScreen">
+  <aside>
+    <div>
+      <div class="brand">SAMI · Gestão</div>
+      <nav>
+        <button class="navbtn" data-view="inicio" onclick="navigate('inicio')">Início</button>
+        <button class="navbtn" data-view="projetos" onclick="navigate('projetos')">Projetos</button>
+        <button class="navbtn" data-view="tarefas" onclick="navigate('tarefas')">Tarefas</button>
+        <button class="navbtn" data-view="financeiro" onclick="navigate('financeiro')">Financeiro</button>
+        <button class="navbtn" data-view="fornecedores" onclick="navigate('fornecedores')">Fornecedores</button>
+        <button class="navbtn" data-view="orcamentos" onclick="navigate('orcamentos')">Orçamentos</button>
+        <button class="navbtn" data-view="equipe" onclick="navigate('equipe')">Equipe</button>
+      </nav>
+    </div>
+    <button class="btn-ghost mono" style="text-transform:uppercase;font-size:11px;" onclick="handleLogout()">Sair</button>
+  </aside>
+
+  <main>
+
+    <!-- INÍCIO -->
+    <section id="view-inicio">
+      <div class="grid" style="grid-template-columns:1fr 1.1fr;margin-bottom:28px;">
+        <div class="hero">
+          <div>
+            <p class="mono" id="heroDia" style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;opacity:.85;"></p>
+            <p class="time" id="heroHora"></p>
+            <p id="heroData" style="font-size:14px;opacity:.9;"></p>
+          </div>
+          <p id="heroResumo" style="font-size:13px;opacity:.85;margin-top:28px;"></p>
+        </div>
+        <div class="card">
+          <div class="cal-head">
+            <p class="display" id="calTitulo" style="font-weight:600;margin:0;"></p>
+            <div style="display:flex;gap:4px;">
+              <button class="navbtn-cal" onclick="mudarMes(-1)">‹</button>
+              <button class="navbtn-cal" onclick="mudarMes(1)">›</button>
+            </div>
+          </div>
+          <div class="cal-grid" style="margin-bottom:4px;">
+            <span class="cal-dow">D</span><span class="cal-dow">S</span><span class="cal-dow">T</span><span class="cal-dow">Q</span><span class="cal-dow">Q</span><span class="cal-dow">S</span><span class="cal-dow">S</span>
+          </div>
+          <div class="cal-grid" id="calGrid"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <p class="label mono" style="margin:0;">Compromissos</p>
+        <button class="btn" onclick="toggleForm('formCompromisso')">+ Novo compromisso</button>
+      </div>
+      <form id="formCompromisso" class="form-box hidden" onsubmit="criarCompromisso(event)">
+        <input id="cpTitulo" required placeholder="Título (ex: Visita técnica)" />
+        <select id="cpProjeto"></select>
+        <input id="cpDataHora" type="datetime-local" required />
+        <input id="cpLocal" placeholder="Local (opcional)" />
+        <div class="form-actions">
+          <button type="submit" class="btn">Salvar compromisso</button>
+          <button type="button" class="btn-ghost" onclick="toggleForm('formCompromisso', false)">Cancelar</button>
+        </div>
+      </form>
+      <div class="card" id="listaCompromissos" style="padding:0;"></div>
+    </section>
+
+    <!-- PROJETOS -->
+    <section id="view-projetos" class="hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+        <h1 style="margin:0;">Projetos</h1>
+        <button class="btn" onclick="toggleForm('formNovoProjeto')">+ Novo projeto</button>
+      </div>
+      <form id="formNovoProjeto" class="form-box hidden" onsubmit="criarProjeto(event)">
+        <input id="npNome" required placeholder="Nome do projeto" />
+        <input id="npCliente" placeholder="Cliente" />
+        <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Previsão de entrega</label>
+        <input id="npData" type="date" />
+        <div class="form-actions">
+          <button type="submit" class="btn">Criar projeto</button>
+          <button type="button" class="btn-ghost" onclick="toggleForm('formNovoProjeto', false)">Cancelar</button>
+        </div>
+      </form>
+      <div class="grid cards4" id="projetosGrid"></div>
+    </section>
+
+    <!-- DETALHE DO PROJETO -->
+    <section id="view-projeto-detalhe" class="hidden">
+      <button class="btn-ghost mono" style="font-size:11px;text-transform:uppercase;padding:0;margin-bottom:14px;" onclick="navigate('projetos')">‹ Voltar pra Projetos</button>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;">
+        <div>
+          <p class="label" id="pdCliente"></p>
+          <h1 id="pdNome" style="margin:0;"></h1>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <select id="pdStatus" class="mono" style="border:1px solid var(--line);padding:7px;font-size:13px;" onchange="atualizarStatusProjeto(this.value)"></select>
+          <button class="remove-link mono" style="text-transform:uppercase;" onclick="excluirProjetoAtual()">Excluir projeto</button>
+        </div>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:32px;">
+        <div>
+          <p class="col-label">Etapas</p>
+          <form onsubmit="adicionarEtapa(event)" style="display:flex;gap:6px;margin-bottom:12px;">
+            <input id="etNome" placeholder="Nova etapa" style="flex:1;border:1px solid var(--line);padding:7px 8px;" />
+            <button class="btn" style="padding:7px 10px;">+</button>
+          </form>
+          <div id="listaEtapas"></div>
+        </div>
+        <div>
+          <p class="col-label">Tarefas</p>
+          <form onsubmit="adicionarTarefaProjeto(event)" style="display:flex;gap:6px;margin-bottom:12px;">
+            <input id="tpTitulo" placeholder="Nova tarefa" style="flex:1;border:1px solid var(--line);padding:7px 8px;" />
+            <button class="btn" style="padding:7px 10px;">+</button>
+          </form>
+          <div id="listaTarefasProjeto"></div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
+            <p class="col-label" style="margin:0;">Financeiro</p>
+            <p class="mono" id="pdTotalFinanceiro" style="font-size:11px;color:var(--graphite);"></p>
+          </div>
+          <form onsubmit="adicionarParcelaProjeto(event)" style="margin-bottom:12px;">
+            <input id="fpDescricao" placeholder="Descrição" style="width:100%;border:1px solid var(--line);padding:7px 8px;margin-bottom:6px;" />
+            <div style="display:flex;gap:6px;margin-bottom:6px;">
+              <input id="fpValor" placeholder="Valor" style="flex:1;border:1px solid var(--line);padding:7px 8px;" />
+              <input id="fpVencimento" type="date" style="flex:1;border:1px solid var(--line);padding:7px 8px;" />
+            </div>
+            <button class="btn" style="width:100%;">+ Lançar parcela</button>
+          </form>
+          <div id="listaParcelasProjeto"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAREFAS -->
+    <section id="view-tarefas" class="hidden">
+      <h1>Tarefas</h1>
+      <div id="alertaAtrasadas" class="alertbox hidden"></div>
+      <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaTarefa')">+ Nova tarefa</button>
+      <form id="formNovaTarefa" class="form-box hidden" onsubmit="criarTarefaGlobal(event)">
+        <input id="ntTitulo" required placeholder="Título da tarefa" />
+        <select id="ntProjeto"></select>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
+          <input id="ntPrazo" type="date" style="flex:1;" />
+          <label style="font-size:13px;color:var(--graphite);white-space:nowrap;"><input id="ntTerceirizado" type="checkbox" /> Terceirizado</label>
+        </div>
+        <p class="label">Responsáveis</p>
+        <div id="ntResponsaveis" class="chip-select"></div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Salvar tarefa</button>
+          <button type="button" class="btn-ghost" onclick="toggleForm('formNovaTarefa', false)">Cancelar</button>
+        </div>
+      </form>
+      <div class="kanban" id="kanbanTarefas"></div>
+    </section>
+
+    <!-- FINANCEIRO -->
+    <section id="view-financeiro" class="hidden">
+      <h1>Financeiro</h1>
+      <div class="grid cards4" id="financeiroResumo" style="margin-bottom:24px;"></div>
+      <div class="grid" style="grid-template-columns:2fr 1fr;margin-bottom:24px;">
+        <div class="chartbox"><p class="label">Por mês (vencimento)</p><canvas id="chartMes" height="150"></canvas></div>
+        <div class="chartbox"><p class="label">Distribuição</p><canvas id="chartStatus" height="150"></canvas></div>
+      </div>
+      <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaParcela')">+ Lançar parcela</button>
+      <form id="formNovaParcela" class="form-box hidden" onsubmit="criarParcelaGlobal(event)">
+        <input id="fgDescricao" placeholder="Descrição" />
+        <select id="fgProjeto"></select>
+        <div style="display:flex;gap:10px;">
+          <input id="fgValor" required placeholder="Valor" style="flex:1;" />
+          <input id="fgVencimento" type="date" required style="flex:1;" />
+        </div>
+        <input id="fgForma" placeholder="Forma de pagamento (opcional)" style="margin-top:10px;" />
+        <div class="form-actions">
+          <button type="submit" class="btn">Salvar parcela</button>
+          <button type="button" class="btn-ghost" onclick="toggleForm('formNovaParcela', false)">Cancelar</button>
+        </div>
+      </form>
+      <div class="card" style="padding:0;">
+        <table>
+          <thead><tr><th>Descrição / Projeto</th><th>Vencimento</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+          <tbody id="tabelaParcelas"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- FORNECEDORES -->
+    <section id="view-fornecedores" class="hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+        <h1 style="margin:0;">Fornecedores</h1>
+        <button class="btn" onclick="toggleForm('formFornecedor')">+ Novo fornecedor</button>
+      </div>
+      <form id="formFornecedor" class="form-box hidden" onsubmit="criarFornecedor(event)">
+        <input id="fnNome" required placeholder="Nome do fornecedor" />
+        <input id="fnCategoria" placeholder="Categoria (ex: Marcenaria, Iluminação)" />
+        <input id="fnContato" placeholder="Pessoa de contato" />
+        <div style="display:flex;gap:10px;">
+          <input id="fnTelefone" placeholder="Telefone" style="flex:1;" />
+          <input id="fnEmail" placeholder="E-mail" style="flex:1;" />
+        </div>
+        <div class="form-actions" style="margin-top:10px;">
+          <button type="submit" class="btn">Salvar</button>
+          <button type="button" class="btn-ghost" onclick="toggleForm('formFornecedor', false)">Cancelar</button>
+        </div>
+      </form>
+      <div class="grid" style="grid-template-columns:repeat(3,1fr);" id="gridFornecedores"></div>
+    </section>
+
+    <!-- ORÇAMENTOS -->
+    <section id="view-orcamentos" class="hidden">
+      <h1>Orçamentos</h1>
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);max-width:480px;margin-bottom:24px;" id="orcamentosResumo"></div>
+      <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formOrcamento')">+ Novo orçamento</button>
+      <form id="formOrcamento" class="form-box hidden" onsubmit="criarOrcamento(event)">
+        <select id="ocProjeto"></select>
+        <select id="ocFornecedor"></select>
+        <input id="ocDescricao" placeholder="Descrição (ex: Marcenaria sob medida)" />
+        <input id="ocValor" required placeholder="Valor" />
+        <div class="form-actions">
+          <button type="submit" class="btn">Salvar orçamento</button>
+          <button type="button" class="btn-ghost" onclick="toggleForm('formOrcamento', false)">Cancelar</button>
+        </div>
+      </form>
+      <div class="card" style="padding:0;">
+        <table>
+          <thead><tr><th>Descrição / Projeto</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+          <tbody id="tabelaOrcamentos"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- EQUIPE -->
+    <section id="view-equipe" class="hidden">
+      <h1>Equipe</h1>
+      <div class="grid" style="grid-template-columns:1.3fr 1fr;">
+        <div>
+          <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formEquipe')">+ Nova pessoa</button>
+          <form id="formEquipe" class="form-box hidden" onsubmit="criarMembro(event)">
+            <input id="eqNome" required placeholder="Nome" />
+            <input id="eqFuncao" placeholder="Função (ex: Arquiteta, Estagiário)" />
+            <div class="form-actions">
+              <button type="submit" class="btn">Salvar</button>
+              <button type="button" class="btn-ghost" onclick="toggleForm('formEquipe', false)">Cancelar</button>
+            </div>
+          </form>
+          <div class="card" style="padding:0;">
+            <table>
+              <thead><tr><th>Nome / Função</th><th>Tarefas concl.</th><th>Tempo total</th><th>Status</th></tr></thead>
+              <tbody id="tabelaEquipe"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="chartbox">
+          <p class="label">Horas registradas por pessoa</p>
+          <canvas id="chartEquipe" height="200"></canvas>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* ======================================================================
+   CONFIGURAÇÃO — cole aqui os dois valores do seu projeto Supabase
+   (Project Settings → API, na sua conta Supabase)
+   ====================================================================== */
+const SUPABASE_URL = "https://kyawrtkhgheqjgofjnti.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt5YXdydGtoZ2hlcWpnb2ZqbnRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2NDcwOTYsImV4cCI6MjEwMjIyMzA5Nn0.l0qpjFzyXlAOx3Trf-1Gq07CqSVd5GsjyqcecE_zFzQ";
+/* ====================================================================== */
+
+let sb;
+let mesRef = new Date();
+let charts = {};
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtMoeda(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function fmtDataBR(d){ return new Date(d+'T00:00:00').toLocaleDateString('pt-BR'); }
+function toggleForm(id, show){
+  const f = document.getElementById(id);
+  if(show===undefined) f.classList.toggle('hidden');
+  else f.classList.toggle('hidden', !show);
+}
+
+/* ---------------- INIT / AUTH ---------------- */
+window.addEventListener('DOMContentLoaded', () => {
+  if(SUPABASE_URL.startsWith('COLE_AQUI') || SUPABASE_ANON_KEY.startsWith('COLE_AQUI')){
+    document.getElementById('configWarning').classList.remove('hidden');
+    return;
+  }
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  document.getElementById('formLogin').addEventListener('submit', handleLogin);
+  checkSession();
+  setInterval(atualizarRelogio, 30000);
+});
+
+async function checkSession(){
+  const { data:{ session } } = await sb.auth.getSession();
+  if(session) showApp(); else showLogin();
+}
+
+async function handleLogin(e){
+  e.preventDefault();
+  const email = document.getElementById('loginEmail').value;
+  const senha = document.getElementById('loginSenha').value;
+  const erroEl = document.getElementById('loginErro');
+  erroEl.textContent = '';
+  const { error } = await sb.auth.signInWithPassword({ email, password: senha });
+  if(error){ erroEl.textContent = 'E-mail ou senha incorretos.'; return; }
+  showApp();
+}
+
+async function handleLogout(){
+  await sb.auth.signOut();
+  showLogin();
+}
+
+function showApp(){
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('appScreen').style.display = 'flex';
+  navigate('inicio');
+}
+function showLogin(){
+  document.getElementById('appScreen').style.display = 'none';
+  document.getElementById('loginScreen').classList.remove('hidden');
+}
+
+/* ---------------- NAVEGAÇÃO ---------------- */
+const VIEWS = ['inicio','projetos','projeto-detalhe','tarefas','financeiro','fornecedores','orcamentos','equipe'];
+function navigate(view, opts){
+  opts = opts || {};
+  VIEWS.forEach(v => document.getElementById('view-'+v).classList.toggle('hidden', v!==view));
+  document.querySelectorAll('.navbtn').forEach(b => b.classList.toggle('active', b.dataset.view===view));
+  if(view==='inicio') loadInicio();
+  if(view==='projetos') loadProjetos();
+  if(view==='tarefas') loadTarefas();
+  if(view==='financeiro') loadFinanceiro();
+  if(view==='fornecedores') loadFornecedores();
+  if(view==='orcamentos') loadOrcamentos();
+  if(view==='equipe') loadEquipe();
+  if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId);
+}
+
+async function preencherSelectProjetos(...selectIds){
+  const { data: projetos } = await sb.from('projetos').select('id,nome').order('nome');
+  selectIds.forEach(id => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    const opcaoVazia = el.dataset.opcional === 'true' ? '<option value="">Sem projeto vinculado</option>' : '';
+    el.innerHTML = opcaoVazia + (projetos||[]).map(p => `<option value="${p.id}">${esc(p.nome)}</option>`).join('');
+  });
+}
+
+/* ================= INÍCIO ================= */
+const DIAS_SEMANA = ["Domingo","Segunda-feira","Terça-feira","Quarta-feira","Quinta-feira","Sexta-feira","Sábado"];
+const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+function atualizarRelogio(){
+  const agora = new Date();
+  const heroHora = document.getElementById('heroHora');
+  if(!heroHora) return;
+  document.getElementById('heroDia').textContent = DIAS_SEMANA[agora.getDay()];
+  heroHora.textContent = agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  document.getElementById('heroData').textContent = `${agora.getDate()} de ${MESES[agora.getMonth()].toLowerCase()} de ${agora.getFullYear()}`;
+}
+
+function chaveDia(d){ return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; }
+
+async function loadInicio(){
+  atualizarRelogio();
+  document.getElementById('cpProjeto').dataset.opcional = 'true';
+  await preencherSelectProjetos('cpProjeto');
+
+  const { data: compromissos } = await sb
+    .from('compromissos')
+    .select('id, titulo, data_hora, local, projeto_id, projetos(nome)')
+    .order('data_hora', { ascending: true });
+
+  window._compromissos = compromissos || [];
+  renderCalendario();
+  renderCompromissos();
+}
+
+function renderCalendario(){
+  document.getElementById('calTitulo').textContent = `${MESES[mesRef.getMonth()]} ${mesRef.getFullYear()}`;
+  const compromissosPorDia = new Set((window._compromissos||[]).map(c => chaveDia(new Date(c.data_hora))));
+  const primeiroDia = new Date(mesRef.getFullYear(), mesRef.getMonth(), 1).getDay();
+  const totalDias = new Date(mesRef.getFullYear(), mesRef.getMonth()+1, 0).getDate();
+  const hoje = new Date();
+  let html = '';
+  for(let i=0;i<primeiroDia;i++) html += '<div></div>';
+  for(let d=1; d<=totalDias; d++){
+    const dataAtual = new Date(mesRef.getFullYear(), mesRef.getMonth(), d);
+    const ehHoje = chaveDia(dataAtual) === chaveDia(hoje);
+    const temCompromisso = compromissosPorDia.has(chaveDia(dataAtual));
+    html += `<div class="cal-day${ehHoje?' today':''}">${d}${temCompromisso && !ehHoje ? '<span class="cal-dot"></span>' : ''}</div>`;
+  }
+  document.getElementById('calGrid').innerHTML = html;
+}
+function mudarMes(delta){
+  mesRef = new Date(mesRef.getFullYear(), mesRef.getMonth()+delta, 1);
+  renderCalendario();
+}
+
+function renderCompromissos(){
+  const agoraMs = Date.now() - 1000*60*60*6;
+  const proximos = (window._compromissos||[]).filter(c => new Date(c.data_hora).getTime() >= agoraMs).slice(0,6);
+  document.getElementById('heroResumo').textContent = proximos.length===0
+    ? 'Nenhum compromisso agendado.'
+    : `${proximos.length} compromisso${proximos.length>1?'s':''} nos próximos dias.`;
+
+  const cont = document.getElementById('listaCompromissos');
+  if(proximos.length===0){ cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhum compromisso agendado.</p>'; return; }
+  cont.innerHTML = proximos.map(c => {
+    const d = new Date(c.data_hora);
+    return `<div class="compromisso">
+      <div class="compromisso-row">
+        <div class="datebox"><p class="day">${d.toLocaleDateString('pt-BR',{day:'2-digit'})}</p><p class="mon">${d.toLocaleDateString('pt-BR',{month:'short'})}</p></div>
+        <div>
+          <p style="font-size:14px;margin:0;">${esc(c.titulo)}</p>
+          <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}${c.local?` · ${esc(c.local)}`:''}${c.projetos?.nome?` · ${esc(c.projetos.nome)}`:''}</p>
+        </div>
+      </div>
+      <button class="remove-link" onclick="excluirCompromisso('${c.id}')">remover</button>
+    </div>`;
+  }).join('');
+}
+
+async function criarCompromisso(e){
+  e.preventDefault();
+  const titulo = document.getElementById('cpTitulo').value.trim();
+  const projetoId = document.getElementById('cpProjeto').value;
+  const dataHora = document.getElementById('cpDataHora').value;
+  const local = document.getElementById('cpLocal').value.trim();
+  if(!titulo || !dataHora) return;
+  await sb.from('compromissos').insert({ titulo, projeto_id: projetoId||null, data_hora: new Date(dataHora).toISOString(), local: local||null });
+  e.target.reset();
+  toggleForm('formCompromisso', false);
+  loadInicio();
+}
+async function excluirCompromisso(id){
+  await sb.from('compromissos').delete().eq('id', id);
+  loadInicio();
+}
+
+/* ================= PROJETOS ================= */
+const STATUS_PROJETO_LABEL = {em_andamento:'Em andamento',pausado:'Pausado',concluido:'Concluído',cancelado:'Cancelado'};
+
+async function loadProjetos(){
+  const cont = document.getElementById('projetosGrid');
+  cont.innerHTML = '<p class="muted">Carregando...</p>';
+  const [{ data: projetos }, { data: execucao }] = await Promise.all([
+    sb.from('projetos').select('id,nome,cliente,status,data_prevista').order('criado_em',{ascending:false}),
+    sb.from('v_projetos_execucao').select('projeto_id,percentual_execucao,total_tarefas'),
+  ]);
+  const execMap = new Map((execucao||[]).map(e => [e.projeto_id, e]));
+  if(!projetos || projetos.length===0){ cont.innerHTML = '<p class="muted">Nenhum projeto cadastrado ainda.</p>'; return; }
+  cont.innerHTML = projetos.map(p => {
+    const ex = execMap.get(p.id) || { percentual_execucao:0, total_tarefas:0 };
+    return `<div class="card proj-card" onclick="navigate('projeto-detalhe',{projetoId:'${p.id}'})">
+      <p class="label">${STATUS_PROJETO_LABEL[p.status]||p.status}</p>
+      <p class="proj-title">${esc(p.nome)}</p>
+      ${p.cliente ? `<p class="proj-client">${esc(p.cliente)}</p>` : '<div style="height:14px;"></div>'}
+      <div class="bar"><div style="width:${ex.percentual_execucao}%"></div></div>
+      <p class="barcaption">${ex.percentual_execucao}% concluído${ex.total_tarefas ? ` · ${ex.total_tarefas} tarefas` : ''}</p>
+    </div>`;
+  }).join('');
+}
+
+async function criarProjeto(e){
+  e.preventDefault();
+  const nome = document.getElementById('npNome').value.trim();
+  const cliente = document.getElementById('npCliente').value.trim();
+  const dataPrevista = document.getElementById('npData').value;
+  if(!nome) return;
+  const { data } = await sb.from('projetos').insert({ nome, cliente: cliente||null, data_prevista: dataPrevista||null }).select('id').single();
+  e.target.reset();
+  toggleForm('formNovoProjeto', false);
+  if(data) navigate('projeto-detalhe', { projetoId: data.id });
+}
+
+/* ================= DETALHE DO PROJETO ================= */
+let projetoAtualId = null;
+
+async function loadProjetoDetalhe(projetoId){
+  projetoAtualId = projetoId;
+  const [{ data: projeto }, { data: etapas }, { data: tarefas }, { data: parcelas }, { data: responsaveis }] = await Promise.all([
+    sb.from('projetos').select('*').eq('id', projetoId).single(),
+    sb.from('etapas').select('*').eq('projeto_id', projetoId).order('ordem'),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo').eq('projeto_id', projetoId).order('criado_em',{ascending:false}),
+    sb.from('financeiro_parcelas').select('id,descricao,valor,vencimento,status').eq('projeto_id', projetoId).order('vencimento'),
+    sb.from('tarefas_responsaveis').select('tarefa_id,equipe(nome)'),
+  ]);
+  if(!projeto) { navigate('projetos'); return; }
+
+  document.getElementById('pdCliente').textContent = projeto.cliente || '';
+  document.getElementById('pdNome').textContent = projeto.nome;
+  document.getElementById('pdStatus').innerHTML = Object.entries(STATUS_PROJETO_LABEL)
+    .map(([v,l]) => `<option value="${v}" ${v===projeto.status?'selected':''}>${l}</option>`).join('');
+
+  const respPorTarefa = new Map();
+  (responsaveis||[]).forEach(r => {
+    if(!r.equipe?.nome) return;
+    const atual = respPorTarefa.get(r.tarefa_id) || [];
+    atual.push(r.equipe.nome);
+    respPorTarefa.set(r.tarefa_id, atual);
+  });
+
+  // Etapas
+  document.getElementById('listaEtapas').innerHTML = (etapas||[]).length===0
+    ? '<p class="muted">Nenhuma etapa ainda.</p>'
+    : etapas.map(et => `
+      <div class="task-card" style="display:flex;justify-content:space-between;align-items:center;">
+        <button class="btn-ghost" style="text-align:left;padding:0;" onclick="alternarEtapaStatus('${et.id}','${et.status}')">
+          <span style="font-size:13.5px;color:var(--ink);display:block;">${esc(et.nome)}</span>
+          <span class="mono" style="font-size:10px;text-transform:uppercase;color:var(--graphite);">${et.status==='pendente'?'Pendente':et.status==='em_andamento'?'Em andamento':'Concluída'}</span>
+        </button>
+        <button class="remove-link" onclick="excluirEtapa('${et.id}')">remover</button>
+      </div>`).join('');
+
+  // Tarefas
+  document.getElementById('listaTarefasProjeto').innerHTML = (tarefas||[]).length===0
+    ? '<p class="muted">Nenhuma tarefa ainda.</p>'
+    : tarefas.map(t => {
+      const resp = respPorTarefa.get(t.id) || [];
+      return `<div class="task-card">
+        <div style="display:flex;justify-content:space-between;gap:8px;">
+          <p class="task-title">${esc(t.titulo)}</p>
+          <button class="remove-link" onclick="excluirTarefaProjeto('${t.id}')">remover</button>
+        </div>
+        ${resp.length ? `<div style="margin:6px 0;">${resp.map(n=>`<span class="badge line">${esc(n)}</span>`).join('')}</div>` : ''}
+        <div class="move-row" style="margin-top:8px;">
+          <button onclick="moverTarefaProjeto('${t.id}','pendente')" style="${t.status==='pendente'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Pendente</button>
+          <button onclick="moverTarefaProjeto('${t.id}','em_andamento')" style="${t.status==='em_andamento'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Andamento</button>
+          <button onclick="moverTarefaProjeto('${t.id}','concluida')" style="${t.status==='concluida'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Concluída</button>
+        </div>
+      </div>`;
+    }).join('');
+
+  // Financeiro
+  const total = (parcelas||[]).reduce((s,p) => s + Number(p.valor), 0);
+  document.getElementById('pdTotalFinanceiro').textContent = fmtMoeda(total);
+  document.getElementById('listaParcelasProjeto').innerHTML = (parcelas||[]).length===0
+    ? '<p class="muted">Nenhuma parcela ainda.</p>'
+    : parcelas.map(p => `
+      <div class="task-card" style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <p style="font-size:13.5px;margin:0;">${esc(p.descricao || 'Parcela')}</p>
+          <p style="font-size:11px;color:var(--graphite);margin:2px 0 0;">${fmtMoeda(p.valor)} · ${fmtDataBR(p.vencimento)}</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          ${p.status!=='pago' ? `<button class="btn-ghost" style="font-size:11px;color:var(--sage);padding:0;" onclick="marcarParcelaProjetoPaga('${p.id}')">marcar pago</button>` : ''}
+          <button class="remove-link" onclick="excluirParcelaProjeto('${p.id}')">remover</button>
+        </div>
+      </div>`).join('');
+}
+
+async function atualizarStatusProjeto(status){
+  await sb.from('projetos').update({ status }).eq('id', projetoAtualId);
+}
+async function excluirProjetoAtual(){
+  if(!confirm('Excluir este projeto? Isso apaga etapas, tarefas e financeiro dele.')) return;
+  await sb.from('projetos').delete().eq('id', projetoAtualId);
+  navigate('projetos');
+}
+async function adicionarEtapa(e){
+  e.preventDefault();
+  const nome = document.getElementById('etNome').value.trim();
+  if(!nome) return;
+  await sb.from('etapas').insert({ projeto_id: projetoAtualId, nome, ordem: 0 });
+  e.target.reset();
+  loadProjetoDetalhe(projetoAtualId);
+}
+async function alternarEtapaStatus(id, statusAtual){
+  const proximo = statusAtual==='pendente' ? 'em_andamento' : statusAtual==='em_andamento' ? 'concluida' : 'pendente';
+  await sb.from('etapas').update({ status: proximo }).eq('id', id);
+  loadProjetoDetalhe(projetoAtualId);
+}
+async function excluirEtapa(id){
+  await sb.from('etapas').delete().eq('id', id);
+  loadProjetoDetalhe(projetoAtualId);
+}
+async function adicionarTarefaProjeto(e){
+  e.preventDefault();
+  const titulo = document.getElementById('tpTitulo').value.trim();
+  if(!titulo) return;
+  await sb.from('tarefas').insert({ projeto_id: projetoAtualId, titulo });
+  e.target.reset();
+  loadProjetoDetalhe(projetoAtualId);
+}
+async function moverTarefaProjeto(id, status){
+  await sb.from('tarefas').update({ status }).eq('id', id);
+  loadProjetoDetalhe(projetoAtualId);
+}
+async function excluirTarefaProjeto(id){
+  await sb.from('tarefas').delete().eq('id', id);
+  loadProjetoDetalhe(projetoAtualId);
+}
+async function adicionarParcelaProjeto(e){
+  e.preventDefault();
+  const valor = document.getElementById('fpValor').value;
+  const vencimento = document.getElementById('fpVencimento').value;
+  if(!valor || !vencimento) return;
+  await sb.from('financeiro_parcelas').insert({
+    projeto_id: projetoAtualId,
+    descricao: document.getElementById('fpDescricao').value.trim() || null,
+    valor: Number(valor.replace(',', '.')),
+    vencimento,
+  });
+  e.target.reset();
+  loadProjetoDetalhe(projetoAtualId);
+}
+async function marcarParcelaProjetoPaga(id){
+  await sb.from('financeiro_parcelas').update({ status: 'pago' }).eq('id', id);
+  loadProjetoDetalhe(projetoAtualId);
+}
+async function excluirParcelaProjeto(id){
+  await sb.from('financeiro_parcelas').delete().eq('id', id);
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+/* ================= TAREFAS (kanban global) ================= */
+const STATUS_TAREFA = [
+  { status:'pendente', label:'Pendente' },
+  { status:'em_andamento', label:'Em andamento' },
+  { status:'concluida', label:'Concluída' },
+];
+
+async function loadTarefas(){
+  document.getElementById('ntProjeto').dataset.opcional = 'false';
+  await preencherSelectProjetos('ntProjeto');
+
+  const { data: equipe } = await sb.from('equipe').select('id,nome').eq('ativo', true).order('nome');
+  window._equipeAtiva = equipe || [];
+  document.getElementById('ntResponsaveis').innerHTML = (equipe||[]).map(m =>
+    `<button type="button" class="chip" data-id="${m.id}" onclick="this.classList.toggle('on')">${esc(m.nome)}</button>`
+  ).join('');
+
+  const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }] = await Promise.all([
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,projetos(nome)').order('criado_em',{ascending:false}),
+    sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id,equipe(nome)'),
+    sb.from('tarefas_tempo').select('id,tarefa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
+  ]);
+
+  const respPorTarefa = new Map();
+  (responsaveis||[]).forEach(r => {
+    if(!r.equipe?.nome) return;
+    const atual = respPorTarefa.get(r.tarefa_id) || [];
+    atual.push(r.equipe.nome);
+    respPorTarefa.set(r.tarefa_id, atual);
+  });
+  const tempoAbertoPorTarefa = new Map((temposAbertos||[]).map(t => [t.tarefa_id, t]));
+
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const atrasadas = (tarefas||[]).filter(t => t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje);
+  const alertaEl = document.getElementById('alertaAtrasadas');
+  if(atrasadas.length>0){
+    alertaEl.classList.remove('hidden');
+    alertaEl.innerHTML = `<p class="label mono">${atrasadas.length===1?'1 tarefa fora do prazo':atrasadas.length+' tarefas fora do prazo'}</p>
+      <ul style="margin:6px 0 0;padding-left:18px;">
+        ${atrasadas.map(t => `<li>${esc(t.titulo)} — ${esc(t.projetos?.nome||'')} · venceu em ${fmtDataBR(t.prazo)}</li>`).join('')}
+      </ul>`;
+  } else {
+    alertaEl.classList.add('hidden');
+  }
+
+  document.getElementById('kanbanTarefas').innerHTML = STATUS_TAREFA.map(col => {
+    const itens = (tarefas||[]).filter(t => t.status===col.status);
+    return `<div>
+      <p class="col-label">${col.label}</p>
+      ${itens.map(t => {
+        const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
+        const resp = respPorTarefa.get(t.id) || [];
+        const tempoAberto = tempoAbertoPorTarefa.get(t.id);
+        return `<div class="task-card${atrasada?' atrasada':''}">
+          <p class="label" style="margin-bottom:2px;">${esc(t.projetos?.nome||'')}</p>
+          <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;">
+            <p class="task-title">${esc(t.titulo)}</p>
+            <button class="remove-link" onclick="excluirTarefaKanban('${t.id}')">remover</button>
+          </div>
+          <div style="margin-bottom:6px;">
+            ${atrasada ? '<span class="badge alert">Atrasada</span>' : ''}
+            ${t.terceirizado ? '<span class="badge clay">Terceirizado</span>' : ''}
+            ${resp.map(n => `<span class="badge line">${esc(n)}</span>`).join('')}
+          </div>
+          ${t.prazo ? `<p style="font-size:11px;margin:0 0 8px;color:${atrasada?'var(--alert)':'var(--graphite)'};">Prazo: ${fmtDataBR(t.prazo)}</p>` : ''}
+          ${tempoAberto
+            ? `<button class="timer-btn running" onclick="pararCronometro('${tempoAberto.id}')">● Parar cronômetro (${esc(tempoAberto.equipe?.nome||'')})</button>`
+            : `<div style="display:flex;gap:4px;margin-bottom:8px;">
+                <select id="sel-eq-${t.id}" style="flex:1;font-size:11px;border:1px solid var(--line);">
+                  ${(window._equipeAtiva||[]).map(m => `<option value="${m.id}">${esc(m.nome)}</option>`).join('')}
+                </select>
+                <button class="btn" style="font-size:10px;padding:5px 8px;" onclick="iniciarCronometro('${t.id}')">Iniciar</button>
+              </div>`}
+          <div class="move-row">
+            ${STATUS_TAREFA.filter(c=>c.status!==col.status).map(c => `<button onclick="moverTarefaKanban('${t.id}','${c.status}')">→ ${c.label}</button>`).join('')}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+}
+
+async function criarTarefaGlobal(e){
+  e.preventDefault();
+  const titulo = document.getElementById('ntTitulo').value.trim();
+  const projetoId = document.getElementById('ntProjeto').value;
+  if(!titulo || !projetoId) return;
+  const { data: tarefa } = await sb.from('tarefas').insert({
+    titulo, projeto_id: projetoId,
+    prazo: document.getElementById('ntPrazo').value || null,
+    terceirizado: document.getElementById('ntTerceirizado').checked,
+  }).select('id').single();
+
+  const chips = Array.from(document.querySelectorAll('#ntResponsaveis .chip.on')).map(c => c.dataset.id);
+  if(tarefa && chips.length>0){
+    await sb.from('tarefas_responsaveis').insert(chips.map(equipeId => ({ tarefa_id: tarefa.id, equipe_id: equipeId })));
+  }
+  e.target.reset();
+  document.querySelectorAll('#ntResponsaveis .chip').forEach(c => c.classList.remove('on'));
+  toggleForm('formNovaTarefa', false);
+  loadTarefas();
+}
+async function moverTarefaKanban(id, status){ await sb.from('tarefas').update({ status }).eq('id', id); loadTarefas(); }
+async function excluirTarefaKanban(id){ await sb.from('tarefas').delete().eq('id', id); loadTarefas(); }
+async function iniciarCronometro(tarefaId){
+  const sel = document.getElementById('sel-eq-'+tarefaId);
+  const equipeId = sel ? sel.value : null;
+  if(!equipeId) return;
+  await sb.from('tarefas_tempo').insert({ tarefa_id: tarefaId, equipe_id: equipeId, inicio: new Date().toISOString() });
+  loadTarefas();
+}
+async function pararCronometro(tempoId){
+  await sb.from('tarefas_tempo').update({ fim: new Date().toISOString() }).eq('id', tempoId);
+  loadTarefas();
+}
+
+/* ================= FINANCEIRO ================= */
+const CORES = { pago:'#5C6E5A', pendente:'#9C6B4F', atrasado:'#8B3A2B' };
+function statusEfetivo(p){
+  if(p.status==='pago') return 'pago';
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  return new Date(p.vencimento+'T00:00:00') < hoje ? 'atrasado' : 'pendente';
+}
+
+async function loadFinanceiro(){
+  document.getElementById('fgProjeto').dataset.opcional = 'false';
+  await preencherSelectProjetos('fgProjeto');
+
+  const { data: parcelas } = await sb
+    .from('financeiro_parcelas')
+    .select('id,descricao,valor,vencimento,status,forma_pagamento,projeto_id,projetos(nome)')
+    .order('vencimento', { ascending: true });
+  window._parcelas = parcelas || [];
+
+  let recebido=0, pendente=0, atrasado=0;
+  window._parcelas.forEach(p => {
+    const s = statusEfetivo(p);
+    if(s==='pago') recebido += Number(p.valor);
+    else if(s==='atrasado') atrasado += Number(p.valor);
+    else pendente += Number(p.valor);
+  });
+  const total = recebido+pendente+atrasado;
+
+  document.getElementById('financeiroResumo').innerHTML = `
+    <div class="card"><p class="label">Total geral</p><p style="font-size:18px;font-weight:600;">${fmtMoeda(total)}</p></div>
+    <div class="card"><p class="label">Recebido</p><p style="font-size:18px;font-weight:600;color:${CORES.pago};">${fmtMoeda(recebido)}</p></div>
+    <div class="card"><p class="label">Pendente</p><p style="font-size:18px;font-weight:600;color:${CORES.pendente};">${fmtMoeda(pendente)}</p></div>
+    <div class="card"><p class="label">Atrasado</p><p style="font-size:18px;font-weight:600;color:${CORES.atrasado};">${fmtMoeda(atrasado)}</p></div>`;
+
+  document.getElementById('tabelaParcelas').innerHTML = window._parcelas.length===0
+    ? '<tr><td colspan="5" class="muted">Nenhuma parcela lançada ainda.</td></tr>'
+    : window._parcelas.map(p => {
+      const s = statusEfetivo(p);
+      return `<tr>
+        <td><p style="margin:0;">${esc(p.descricao||'Parcela')}</p><p style="margin:2px 0 0;font-size:11px;color:var(--graphite);">${esc(p.projetos?.nome||'')}</p></td>
+        <td>${fmtDataBR(p.vencimento)}</td>
+        <td>${fmtMoeda(p.valor)}</td>
+        <td>${s==='pago'
+          ? `<span class="pill" style="color:${CORES.pago};border-color:${CORES.pago};">Pago</span>`
+          : `<button class="pill" style="color:${CORES[s]};border-color:${CORES[s]};" onclick="marcarParcelaPaga('${p.id}')">${s==='atrasado'?'Atrasado':'Pendente'} · marcar pago</button>`}
+        </td>
+        <td><button class="remove-link" onclick="excluirParcelaGlobal('${p.id}')">remover</button></td>
+      </tr>`;
+    }).join('');
+
+  renderGraficosFinanceiro();
+}
+
+function renderGraficosFinanceiro(){
+  const meses = new Map();
+  window._parcelas.forEach(p => {
+    const d = new Date(p.vencimento+'T00:00:00');
+    const chave = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const label = d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+    const atual = meses.get(chave) || { mes: label, pago:0, pendente:0, atrasado:0 };
+    const s = statusEfetivo(p);
+    atual[s] += Number(p.valor);
+    meses.set(chave, atual);
+  });
+  const dadosMensais = Array.from(meses.entries()).sort(([a],[b]) => a.localeCompare(b)).map(([,v]) => v);
+
+  if(charts.mes) charts.mes.destroy();
+  charts.mes = new Chart(document.getElementById('chartMes'), {
+    type:'bar',
+    data:{ labels: dadosMensais.map(d=>d.mes),
+      datasets:[
+        {label:'Recebido', data:dadosMensais.map(d=>d.pago), backgroundColor:CORES.pago},
+        {label:'Pendente', data:dadosMensais.map(d=>d.pendente), backgroundColor:CORES.pendente},
+        {label:'Atrasado', data:dadosMensais.map(d=>d.atrasado), backgroundColor:CORES.atrasado},
+      ]},
+    options:{responsive:true, plugins:{legend:{labels:{font:{size:11}}}}, scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,grid:{color:'#EFEAE1'}}}}
+  });
+
+  let recebido=0,pendente=0,atrasado=0;
+  window._parcelas.forEach(p => { const s=statusEfetivo(p); if(s==='pago')recebido+=Number(p.valor); else if(s==='atrasado')atrasado+=Number(p.valor); else pendente+=Number(p.valor); });
+
+  if(charts.status) charts.status.destroy();
+  charts.status = new Chart(document.getElementById('chartStatus'), {
+    type:'doughnut',
+    data:{ labels:['Recebido','Pendente','Atrasado'], datasets:[{ data:[recebido,pendente,atrasado], backgroundColor:[CORES.pago,CORES.pendente,CORES.atrasado] }]},
+    options:{plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}}
+  });
+}
+
+async function criarParcelaGlobal(e){
+  e.preventDefault();
+  const projetoId = document.getElementById('fgProjeto').value;
+  const valor = document.getElementById('fgValor').value;
+  const vencimento = document.getElementById('fgVencimento').value;
+  if(!projetoId || !valor || !vencimento) return;
+  await sb.from('financeiro_parcelas').insert({
+    projeto_id: projetoId,
+    descricao: document.getElementById('fgDescricao').value.trim() || null,
+    valor: Number(valor.replace(',', '.')),
+    vencimento,
+    forma_pagamento: document.getElementById('fgForma').value.trim() || null,
+  });
+  e.target.reset();
+  toggleForm('formNovaParcela', false);
+  loadFinanceiro();
+}
+async function marcarParcelaPaga(id){ await sb.from('financeiro_parcelas').update({ status:'pago' }).eq('id', id); loadFinanceiro(); }
+async function excluirParcelaGlobal(id){ await sb.from('financeiro_parcelas').delete().eq('id', id); loadFinanceiro(); }
+
+/* ================= FORNECEDORES ================= */
+async function loadFornecedores(){
+  const { data: fornecedores } = await sb.from('fornecedores').select('id,nome,categoria,contato,telefone,email').order('nome');
+  window._fornecedores = fornecedores || [];
+  const cont = document.getElementById('gridFornecedores');
+  cont.innerHTML = window._fornecedores.length===0
+    ? '<p class="muted">Nenhum fornecedor cadastrado ainda.</p>'
+    : window._fornecedores.map(f => `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;gap:8px;">
+          <p style="font-weight:600;margin:0 0 2px;font-size:14px;">${esc(f.nome)}</p>
+          <button class="remove-link" onclick="excluirFornecedor('${f.id}')">remover</button>
+        </div>
+        ${f.categoria ? `<p class="label" style="color:var(--terracotta);margin-bottom:8px;">${esc(f.categoria)}</p>` : ''}
+        ${f.contato ? `<p style="font-size:13px;color:var(--graphite);margin:2px 0;">${esc(f.contato)}</p>` : ''}
+        ${f.telefone ? `<p style="font-size:13px;color:var(--graphite);margin:2px 0;">${esc(f.telefone)}</p>` : ''}
+        ${f.email ? `<p style="font-size:13px;color:var(--graphite);margin:2px 0;">${esc(f.email)}</p>` : ''}
+      </div>`).join('');
+}
+async function criarFornecedor(e){
+  e.preventDefault();
+  const nome = document.getElementById('fnNome').value.trim();
+  if(!nome) return;
+  await sb.from('fornecedores').insert({
+    nome,
+    categoria: document.getElementById('fnCategoria').value.trim() || null,
+    contato: document.getElementById('fnContato').value.trim() || null,
+    telefone: document.getElementById('fnTelefone').value.trim() || null,
+    email: document.getElementById('fnEmail').value.trim() || null,
+  });
+  e.target.reset();
+  toggleForm('formFornecedor', false);
+  loadFornecedores();
+}
+async function excluirFornecedor(id){ await sb.from('fornecedores').delete().eq('id', id); loadFornecedores(); }
+
+/* ================= ORÇAMENTOS ================= */
+const STATUS_ORC_LABEL = { aberto:'Em análise', aprovado:'Aprovado', recusado:'Recusado' };
+const STATUS_ORC_COR = { aberto:'#9C6B4F', aprovado:'#5C6E5A', recusado:'#8B3A2B' };
+
+async function loadOrcamentos(){
+  document.getElementById('ocProjeto').dataset.opcional = 'false';
+  document.getElementById('ocFornecedor').dataset.opcional = 'true';
+  await preencherSelectProjetos('ocProjeto');
+  const { data: fornecedores } = await sb.from('fornecedores').select('id,nome').order('nome');
+  document.getElementById('ocFornecedor').innerHTML = '<option value="">Sem fornecedor vinculado</option>' + (fornecedores||[]).map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('');
+
+  const { data: orcamentos } = await sb
+    .from('orcamentos')
+    .select('id,descricao,valor,status,projeto_id,fornecedor_id,projetos(nome),fornecedores(nome)')
+    .order('criado_em', { ascending:false });
+  window._orcamentos = orcamentos || [];
+
+  let aberto=0, aprovado=0;
+  window._orcamentos.forEach(o => { if(o.status==='aberto') aberto+=Number(o.valor); if(o.status==='aprovado') aprovado+=Number(o.valor); });
+  document.getElementById('orcamentosResumo').innerHTML = `
+    <div class="card"><p class="label">Em análise</p><p style="font-size:18px;font-weight:600;color:${STATUS_ORC_COR.aberto};">${fmtMoeda(aberto)}</p></div>
+    <div class="card"><p class="label">Aprovado</p><p style="font-size:18px;font-weight:600;color:${STATUS_ORC_COR.aprovado};">${fmtMoeda(aprovado)}</p></div>`;
+
+  document.getElementById('tabelaOrcamentos').innerHTML = window._orcamentos.length===0
+    ? '<tr><td colspan="4" class="muted">Nenhum orçamento lançado ainda.</td></tr>'
+    : window._orcamentos.map(o => `
+      <tr>
+        <td><p style="margin:0;">${esc(o.descricao||'Orçamento')}</p><p style="margin:2px 0 0;font-size:11px;color:var(--graphite);">${esc(o.projetos?.nome||'')}${o.fornecedores?.nome?` · ${esc(o.fornecedores.nome)}`:''}</p></td>
+        <td>${fmtMoeda(o.valor)}</td>
+        <td><select class="pill" style="color:${STATUS_ORC_COR[o.status]};border-color:${STATUS_ORC_COR[o.status]};" onchange="atualizarStatusOrcamento('${o.id}', this.value)">
+          ${Object.entries(STATUS_ORC_LABEL).map(([v,l]) => `<option value="${v}" ${v===o.status?'selected':''}>${l}</option>`).join('')}
+        </select></td>
+        <td><button class="remove-link" onclick="excluirOrcamento('${o.id}')">remover</button></td>
+      </tr>`).join('');
+}
+async function criarOrcamento(e){
+  e.preventDefault();
+  const projetoId = document.getElementById('ocProjeto').value;
+  const valor = document.getElementById('ocValor').value;
+  if(!projetoId || !valor) return;
+  await sb.from('orcamentos').insert({
+    projeto_id: projetoId,
+    fornecedor_id: document.getElementById('ocFornecedor').value || null,
+    descricao: document.getElementById('ocDescricao').value.trim() || null,
+    valor: Number(valor.replace(',', '.')),
+  });
+  e.target.reset();
+  toggleForm('formOrcamento', false);
+  loadOrcamentos();
+}
+async function atualizarStatusOrcamento(id, status){ await sb.from('orcamentos').update({ status }).eq('id', id); loadOrcamentos(); }
+async function excluirOrcamento(id){ await sb.from('orcamentos').delete().eq('id', id); loadOrcamentos(); }
+
+/* ================= EQUIPE ================= */
+function fmtHoras(segundos){
+  const h = Math.floor(segundos/3600);
+  const m = Math.round((segundos%3600)/60);
+  return `${h}h${String(m).padStart(2,'0')}`;
+}
+
+async function loadEquipe(){
+  const [{ data: equipe }, { data: produtividade }] = await Promise.all([
+    sb.from('equipe').select('id,nome,funcao,ativo').order('nome'),
+    sb.from('v_produtividade_equipe').select('equipe_id,nome,tarefas_com_registro,tempo_total_segundos,tarefas_concluidas'),
+  ]);
+  const prodMap = new Map((produtividade||[]).map(p => [p.equipe_id, p]));
+
+  document.getElementById('tabelaEquipe').innerHTML = (equipe||[]).length===0
+    ? '<tr><td colspan="4" class="muted">Nenhuma pessoa cadastrada ainda.</td></tr>'
+    : equipe.map(m => {
+      const p = prodMap.get(m.id);
+      return `<tr>
+        <td><p style="margin:0;">${esc(m.nome)}</p>${m.funcao?`<p style="margin:2px 0 0;font-size:11px;color:var(--graphite);">${esc(m.funcao)}</p>`:''}</td>
+        <td>${p?.tarefas_concluidas || 0}</td>
+        <td>${fmtHoras(p?.tempo_total_segundos || 0)}</td>
+        <td><button class="pill" style="color:${m.ativo?'var(--sage)':'var(--graphite)'};border-color:${m.ativo?'var(--sage)':'var(--line)'};" onclick="alternarAtivoMembro('${m.id}', ${m.ativo})">${m.ativo?'Ativo':'Inativo'}</button></td>
+      </tr>`;
+    }).join('');
+
+  const dadosGrafico = (produtividade||[]).filter(p => p.tempo_total_segundos>0).map(p => ({ nome:p.nome, horas: Math.round((p.tempo_total_segundos/3600)*10)/10 }));
+  if(charts.equipe) charts.equipe.destroy();
+  charts.equipe = new Chart(document.getElementById('chartEquipe'), {
+    type:'bar',
+    data:{ labels: dadosGrafico.map(d=>d.nome), datasets:[{ data: dadosGrafico.map(d=>d.horas), backgroundColor:'#C1602E' }]},
+    options:{indexAxis:'y', plugins:{legend:{display:false}}, scales:{x:{grid:{color:'#EFEAE1'}},y:{grid:{display:false}}}}
+  });
+}
+async function criarMembro(e){
+  e.preventDefault();
+  const nome = document.getElementById('eqNome').value.trim();
+  if(!nome) return;
+  await sb.from('equipe').insert({ nome, funcao: document.getElementById('eqFuncao').value.trim() || null });
+  e.target.reset();
+  toggleForm('formEquipe', false);
+  loadEquipe();
+}
+async function alternarAtivoMembro(id, ativo){ await sb.from('equipe').update({ ativo: !ativo }).eq('id', id); loadEquipe(); }
+</script>
+
+</body>
+</html>
