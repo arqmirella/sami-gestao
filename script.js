@@ -4,6 +4,11 @@
    ====================================================================== */
 const SUPABASE_URL = "https://kyawrtkhgheqjgofjnti.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-hD_wTqLCMlLQct3DBTFZw_UvIvLHap";
+
+/* Opcional — cole aqui o e-mail da agenda do Google que você quer mostrar
+   na tela Início (veja o passo a passo que te mandei pra pegar esse endereço).
+   Deixe em branco ("") se não quiser usar isso. */
+const GOOGLE_CALENDAR_EMAIL = "";
 /* ====================================================================== */
 
 let sb;
@@ -12,6 +17,16 @@ let charts = {};
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtMoeda(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+
+/* Verifica se uma operação do Supabase deu erro; se deu, avisa na tela e retorna true. */
+function checarErro(resultado, contexto){
+  if(resultado && resultado.error){
+    console.error(contexto, resultado.error);
+    alert('Não consegui salvar (' + contexto + '):\n' + resultado.error.message);
+    return true;
+  }
+  return false;
+}
 function fmtDataBR(d){ return new Date(d+'T00:00:00').toLocaleDateString('pt-BR'); }
 function toggleForm(id, show){
   const f = document.getElementById(id);
@@ -181,6 +196,22 @@ async function loadInicio(){
   renderCompromissos();
   renderResumoProjetos(projetos||[], execucao||[]);
   renderLinksRapidos(linksRede||[], linksConhecimento||[]);
+  renderGoogleAgenda();
+}
+
+function renderGoogleAgenda(){
+  const cont = document.getElementById('blocoGoogleAgenda');
+  if(!GOOGLE_CALENDAR_EMAIL){
+    cont.innerHTML = `<div class="card" style="font-size:13px;color:var(--graphite);">
+      <p class="label" style="margin-bottom:6px;">Agenda do Google</p>
+      Ainda não conectada. Veja com a equipe o passo a passo pra colar o e-mail da agenda em <span class="mono">GOOGLE_CALENDAR_EMAIL</span> no script.js.
+    </div>`;
+    return;
+  }
+  const src = `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(GOOGLE_CALENDAR_EMAIL)}&ctz=America%2FSao_Paulo&mode=WEEK&showTitle=0&showPrint=0&showCalendars=0`;
+  cont.innerHTML = `<div class="card" style="padding:0;overflow:hidden;">
+    <iframe src="${src}" style="border:0;width:100%;height:480px;display:block;" frameborder="0" scrolling="no"></iframe>
+  </div>`;
 }
 
 const ICONES_REDE = {
@@ -235,7 +266,8 @@ async function criarLinkRapido(e, categoria){
   const nome = document.getElementById('lrNome'+sufixo).value.trim();
   const url = document.getElementById('lrUrl'+sufixo).value.trim();
   if(!nome || !url) return;
-  await sb.from('links_rapidos').insert({ categoria, nome, url, ordem: 0 });
+  const resultado = await sb.from('links_rapidos').insert({ categoria, nome, url, ordem: 0 });
+  if(checarErro(resultado, 'salvar link')) return;
   e.target.reset();
   toggleForm(categoria==='rede_social' ? 'formLinkRede' : 'formLinkConhecimento', false);
   loadInicio();
@@ -364,12 +396,14 @@ async function criarProjeto(e){
 
   const capaUrl = await uploadFotoProjeto(arquivoFoto);
 
-  const { data } = await sb.from('projetos').insert({
+  const resultado = await sb.from('projetos').insert({
     nome,
     cliente_id: clienteId || null,
     data_prevista: dataPrevista || null,
     capa_url: capaUrl || null,
   }).select('id').single();
+  if(checarErro(resultado, 'criar projeto')) return;
+  const { data } = resultado;
   e.target.reset();
   toggleForm('formNovoProjeto', false);
   if(data) navigate('projeto-detalhe', { projetoId: data.id });
@@ -949,12 +983,17 @@ async function excluirTarefaKanban(id){ await sb.from('tarefas').delete().eq('id
 async function iniciarCronometro(tarefaId){
   const sel = document.getElementById('sel-eq-'+tarefaId);
   const equipeId = sel ? sel.value : null;
-  if(!equipeId) return;
-  await sb.from('tarefas_tempo').insert({ tarefa_id: tarefaId, equipe_id: equipeId, inicio: new Date().toISOString() });
+  if(!equipeId){
+    alert('Cadastre pelo menos uma pessoa ativa em "Equipe" antes de usar o cronômetro.');
+    return;
+  }
+  const resultado = await sb.from('tarefas_tempo').insert({ tarefa_id: tarefaId, equipe_id: equipeId, inicio: new Date().toISOString() });
+  if(checarErro(resultado, 'iniciar cronômetro')) return;
   loadTarefas();
 }
 async function pararCronometro(tempoId){
-  await sb.from('tarefas_tempo').update({ fim: new Date().toISOString() }).eq('id', tempoId);
+  const resultado = await sb.from('tarefas_tempo').update({ fim: new Date().toISOString() }).eq('id', tempoId);
+  if(checarErro(resultado, 'parar cronômetro')) return;
   loadTarefas();
 }
 
@@ -1221,7 +1260,7 @@ async function criarCliente(e){
   const nome = document.getElementById('clNome').value.trim();
   if(!nome) return;
   const v = id => document.getElementById(id).value.trim();
-  await sb.from('clientes').insert({
+  const resultado = await sb.from('clientes').insert({
     nome_completo: nome,
     cpf: v('clCpf')||null, rg: v('clRg')||null,
     endereco_atual: v('clEndereco')||null,
@@ -1239,6 +1278,7 @@ async function criarCliente(e){
     sindico_nome: v('clSindicoNome')||null, sindico_contato: v('clSindicoContato')||null,
     documentos_condominio: v('clDocumentos')||null,
   });
+  if(checarErro(resultado, 'cadastrar cliente')) return;
   e.target.reset();
   toggleForm('formNovoCliente', false);
   loadClientes();
@@ -1308,6 +1348,9 @@ async function loadConteudo(){
     ? '<option value="">Cadastre uma rede social acima primeiro</option>'
     : window._redesSociais.map(r => `<option value="${r.id}">${esc(r.nome)}</option>`).join('');
 
+  document.getElementById('idRede').innerHTML = '<option value="">Sem rede vinculada</option>' +
+    window._redesSociais.map(r => `<option value="${r.id}">${esc(r.nome)}</option>`).join('');
+
   const { data: posts } = await sb
     .from('conteudo_posts')
     .select('id,titulo,descricao,data,status,rede_id,redes_sociais_config(nome,cor)')
@@ -1316,6 +1359,7 @@ async function loadConteudo(){
 
   renderCalendarioConteudo();
   renderListaConteudo();
+  loadIdeias();
 }
 
 async function criarRedeSocial(e){
@@ -1323,7 +1367,8 @@ async function criarRedeSocial(e){
   const nome = document.getElementById('rsNome').value.trim();
   const cor = document.getElementById('rsCor').value;
   if(!nome) return;
-  await sb.from('redes_sociais_config').insert({ nome, cor });
+  const resultado = await sb.from('redes_sociais_config').insert({ nome, cor });
+  if(checarErro(resultado, 'cadastrar rede social')) return;
   e.target.reset();
   toggleForm('formRedeSocial', false);
   loadConteudo();
@@ -1392,13 +1437,14 @@ async function criarConteudo(e){
   const titulo = document.getElementById('cpTituloConteudo').value.trim();
   const data = document.getElementById('cpDataConteudo').value;
   if(!titulo || !data) return;
-  await sb.from('conteudo_posts').insert({
+  const resultado = await sb.from('conteudo_posts').insert({
     rede_id: redeId || null,
     titulo,
     data,
     status: document.getElementById('cpStatusConteudo').value,
     descricao: document.getElementById('cpDescricaoConteudo').value.trim() || null,
   });
+  if(checarErro(resultado, 'salvar conteúdo')) return;
   e.target.reset();
   toggleForm('formNovoConteudo', false);
   loadConteudo();
@@ -1461,3 +1507,58 @@ document.addEventListener('click', (e) => {
   const wrap = document.querySelector('.search-wrap');
   if(wrap && !wrap.contains(e.target)) document.getElementById('buscaGeralResultados')?.classList.add('hidden');
 });
+
+/* ================= PAINEL DE IDEIAS (Conteúdo) ================= */
+async function uploadImagemIdeia(file){
+  if(!file) return null;
+  const ext = file.name.split('.').pop();
+  const nomeArquivo = `${crypto.randomUUID ? crypto.randomUUID() : Date.now()}.${ext}`;
+  const { error } = await sb.storage.from('conteudo-ideias').upload(nomeArquivo, file, { upsert: true });
+  if(error){ alert('Não consegui enviar a imagem: ' + error.message); return null; }
+  const { data } = sb.storage.from('conteudo-ideias').getPublicUrl(nomeArquivo);
+  return data?.publicUrl || null;
+}
+
+async function loadIdeias(){
+  const { data: ideias } = await sb
+    .from('conteudo_ideias')
+    .select('id,titulo,imagem_url,nota,rede_id,redes_sociais_config(nome,cor)')
+    .order('criado_em', { ascending: false });
+  window._ideias = ideias || [];
+
+  const cont = document.getElementById('gridIdeias');
+  cont.innerHTML = window._ideias.length===0
+    ? '<p class="muted">Nenhuma referência salva ainda — adicione prints e ideias que encontrar por aí.</p>'
+    : window._ideias.map(i => `
+      <div class="card" style="padding:10px;">
+        <div class="proj-thumb" style="background-image:url('${esc(i.imagem_url)}');margin-bottom:8px;"></div>
+        ${i.titulo ? `<p style="font-size:13px;font-weight:500;margin:0 0 2px;">${esc(i.titulo)}</p>` : ''}
+        ${i.redes_sociais_config ? `<span class="badge line" style="color:${i.redes_sociais_config.cor};margin-bottom:4px;">${esc(i.redes_sociais_config.nome)}</span>` : ''}
+        ${i.nota ? `<p style="font-size:12px;color:var(--graphite);margin:4px 0;">${esc(i.nota)}</p>` : ''}
+        <button class="remove-link" onclick="excluirIdeia('${i.id}')">remover</button>
+      </div>`).join('');
+}
+
+async function criarIdeia(e){
+  e.preventDefault();
+  const arquivo = document.getElementById('idImagem').files[0];
+  if(!arquivo){ alert('Escolha uma imagem primeiro.'); return; }
+
+  const imagemUrl = await uploadImagemIdeia(arquivo);
+  if(!imagemUrl) return;
+
+  const resultado = await sb.from('conteudo_ideias').insert({
+    titulo: document.getElementById('idTitulo').value.trim() || null,
+    rede_id: document.getElementById('idRede').value || null,
+    nota: document.getElementById('idNota').value.trim() || null,
+    imagem_url: imagemUrl,
+  });
+  if(checarErro(resultado, 'salvar ideia')) return;
+  e.target.reset();
+  toggleForm('formNovaIdeia', false);
+  loadIdeias();
+}
+async function excluirIdeia(id){
+  await sb.from('conteudo_ideias').delete().eq('id', id);
+  loadIdeias();
+}

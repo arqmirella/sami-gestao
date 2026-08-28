@@ -111,6 +111,8 @@
       </form>
       <div class="card" id="listaCompromissos" style="padding:0;margin-bottom:32px;"></div>
 
+      <div id="blocoGoogleAgenda" style="margin-bottom:32px;"></div>
+
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
         <p class="label mono" style="margin:0;">Projetos em andamento</p>
         <button class="btn-ghost mono" style="font-size:11px;text-transform:uppercase;padding:0;" onclick="navigate('projetos')">ver todos ›</button>
@@ -476,6 +478,25 @@
           </form>
           <div id="listaConteudo"></div>
         </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <p class="label" style="margin:0;">Painel de ideias / referências</p>
+          <button class="btn-ghost" style="font-size:11px;padding:0;" onclick="toggleForm('formNovaIdeia')">+ adicionar</button>
+        </div>
+        <form id="formNovaIdeia" class="form-box hidden" style="max-width:420px;" onsubmit="criarIdeia(event)">
+          <input id="idTitulo" placeholder="Título / nome da referência (opcional)" />
+          <select id="idRede"><option value="">Sem rede vinculada</option></select>
+          <textarea id="idNota" placeholder="Nota (opcional)" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Imagem (print, referência)</label>
+          <input id="idImagem" type="file" accept="image/*" required style="margin-bottom:10px;" />
+          <div class="form-actions">
+            <button type="submit" class="btn">Salvar</button>
+            <button type="button" class="btn-ghost" onclick="toggleForm('formNovaIdeia', false)">Cancelar</button>
+          </div>
+        </form>
+        <div class="grid" style="grid-template-columns:repeat(4,1fr);" id="gridIdeias"></div>
       </div>
     </section>
 
