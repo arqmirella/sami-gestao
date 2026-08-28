@@ -2,8 +2,8 @@
    CONFIGURAÇÃO — cole aqui os dois valores do seu projeto Supabase
    (Project Settings → API, na sua conta Supabase)
    ====================================================================== */
-const SUPABASE_URL = "COLE_AQUI_A_URL_DO_SUPABASE";
-const SUPABASE_ANON_KEY = "COLE_AQUI_A_CHAVE_ANON_DO_SUPABASE";
+const SUPABASE_URL = "https://kyawrtkhgheqjgofjnti.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_-hD_wTqLCMlLQct3DBTFZw_UvIvLHap";
 /* ====================================================================== */
 
 let sb;
