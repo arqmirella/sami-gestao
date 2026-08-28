@@ -8,7 +8,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_-hD_wTqLCMlLQct3DBTFZw_UvIvLHap";
 /* Opcional — cole aqui o e-mail da agenda do Google que você quer mostrar
    na tela Início (veja o passo a passo que te mandei pra pegar esse endereço).
    Deixe em branco ("") se não quiser usar isso. */
-const GOOGLE_CALENDAR_EMAIL = "";
+const GOOGLE_CALENDAR_EMAIL = "samiarquitetura@gmail.com";
 /* ====================================================================== */
 
 let sb;
