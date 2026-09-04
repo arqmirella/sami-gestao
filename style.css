@@ -146,3 +146,23 @@
   .search-item:hover{background:var(--paper);}
   .search-item .sub{font-size:11.5px;color:var(--graphite);}
   .search-empty{padding:14px;font-size:13px;color:var(--graphite);}
+
+  /* Cronograma (Gantt) */
+  .gantt-months{display:flex;position:relative;height:22px;margin-left:190px;border-bottom:1px solid var(--line);margin-bottom:4px;}
+  .gantt-month-tick{position:absolute;top:0;font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;color:var(--graphite);border-left:1px solid var(--line);padding-left:5px;height:100%;}
+  .gantt-row{display:flex;align-items:center;padding:7px 0;border-bottom:1px solid var(--paper);}
+  .gantt-row-label{width:190px;flex-shrink:0;padding-right:12px;}
+  .gantt-row-label p{margin:0;font-size:13px;}
+  .gantt-row-label span{font-size:11px;color:var(--graphite);}
+  .gantt-track{flex:1;position:relative;height:22px;background:var(--paper);border-radius:6px;min-width:400px;}
+  .gantt-bar{position:absolute;top:2px;bottom:2px;border-radius:5px;min-width:6px;cursor:pointer;}
+  .gantt-today{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--alert);z-index:2;}
+
+  /* Mural de recados */
+  .recado{border-radius:14px;padding:14px 16px;margin-bottom:10px;}
+  .recado.tom-a{background:rgba(193,96,46,.10);}
+  .recado.tom-b{background:rgba(92,110,90,.12);}
+  .recado-topo{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;}
+  .recado-autor{font-weight:600;font-size:13px;}
+  .recado-hora{font-size:11px;color:var(--graphite);}
+  .recado-texto{font-size:13.5px;margin:0;white-space:pre-wrap;}

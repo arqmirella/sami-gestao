@@ -113,6 +113,7 @@ function trocarAbaProjetosModulo(tab){
   if(tab==='dashboard') loadDashboardProjetos();
   if(tab==='lista') loadProjetos();
   if(tab==='tarefas') loadTarefas();
+  if(tab==='cronograma') loadCronograma();
 }
 
 async function loadDashboardProjetos(){
@@ -183,12 +184,17 @@ async function loadInicio(){
   document.getElementById('cpProjeto').dataset.opcional = 'true';
   await preencherSelectProjetos('cpProjeto');
 
-  const [{ data: compromissos }, { data: projetos }, { data: execucao }, { data: linksRede }, { data: linksConhecimento }] = await Promise.all([
+  const nomeSalvo = localStorage.getItem('sami_nome_recado');
+  if(nomeSalvo) document.getElementById('rcAutor').value = nomeSalvo;
+
+  const [{ data: compromissos }, { data: projetos }, { data: execucao }, { data: linksRede }, { data: linksConhecimento }, { data: tarefasHoje }, { data: recados }] = await Promise.all([
     sb.from('compromissos').select('id, titulo, data_hora, local, projeto_id, projetos(nome)').order('data_hora', { ascending: true }),
     sb.from('projetos').select('id,nome,cliente,cliente_id,status,capa_url,clientes(nome_completo)').eq('status','em_andamento').order('criado_em',{ascending:false}).limit(4),
     sb.from('v_projetos_execucao').select('projeto_id,percentual_execucao,total_tarefas'),
     sb.from('links_rapidos').select('*').eq('categoria','rede_social').order('ordem'),
     sb.from('links_rapidos').select('*').eq('categoria','conhecimento').order('ordem'),
+    sb.from('tarefas').select('id,titulo,status,prazo,projeto_id,projetos(nome)').neq('status','concluida').order('prazo',{ascending:true}),
+    sb.from('mural_recados').select('id,autor_nome,texto,criado_em').order('criado_em',{ascending:false}).limit(20),
   ]);
 
   window._compromissos = compromissos || [];
@@ -196,7 +202,34 @@ async function loadInicio(){
   renderCompromissos();
   renderResumoProjetos(projetos||[], execucao||[]);
   renderLinksRapidos(linksRede||[], linksConhecimento||[]);
+  renderTarefasHoje(tarefasHoje||[]);
+  renderRecados(recados||[]);
   renderGoogleAgenda();
+}
+
+function renderTarefasHoje(tarefas){
+  const hojeStr = new Date().toISOString().slice(0,10);
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const relevantes = tarefas.filter(t => t.prazo && t.prazo <= hojeStr);
+  const cont = document.getElementById('tarefasHoje');
+
+  if(relevantes.length===0){
+    cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhuma tarefa vencendo hoje. 🎉</p>';
+    return;
+  }
+
+  cont.innerHTML = relevantes.map(t => {
+    const atrasada = t.prazo < hojeStr;
+    return `<div class="compromisso" style="cursor:pointer;" onclick="navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})">
+      <div class="compromisso-row">
+        <div>
+          <p style="font-size:14px;margin:0;">${esc(t.titulo)}</p>
+          <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${esc(t.projetos?.nome||'')}</p>
+        </div>
+      </div>
+      <span class="badge ${atrasada?'alert':'line'}">${atrasada ? 'Atrasada · '+fmtDataBR(t.prazo) : 'Hoje'}</span>
+    </div>`;
+  }).join('');
 }
 
 function renderGoogleAgenda(){
@@ -416,6 +449,7 @@ let dadosProjetoAtual = null;
 function trocarAbaProjeto(tab){
   document.querySelectorAll('.pd-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'pdtab-'+tab));
   document.querySelectorAll('.pd-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
+  if(tab==='anexos') loadAnexos();
 }
 
 async function loadProjetoDetalhe(projetoId){
@@ -577,6 +611,52 @@ async function loadProjetoDetalhe(projetoId){
   document.getElementById('doDataInicio').value = projeto.data_inicio_obra || '';
   document.getElementById('doArquiteta').value = projeto.arquiteta_responsavel || '';
   document.getElementById('doEmpresa').value = projeto.empresa_engenharia || '';
+
+  document.getElementById('anEtapa').innerHTML = '<option value="">Sem etapa vinculada</option>' +
+    (etapas||[]).map(et => `<option value="${et.id}">${esc(et.nome)}</option>`).join('');
+  document.getElementById('anTarefa').innerHTML = '<option value="">Sem tarefa vinculada</option>' +
+    (tarefas||[]).map(t => `<option value="${t.id}">${esc(t.titulo)}</option>`).join('');
+
+  renderPortalCliente(projeto);
+}
+
+function linkPortalCompleto(token){
+  return new URL('portal.html', window.location.href).href + '?token=' + token;
+}
+
+function renderPortalCliente(projeto){
+  const cont = document.getElementById('portalClienteStatus');
+  if(!cont) return;
+  if(projeto.portal_token){
+    const link = linkPortalCompleto(projeto.portal_token);
+    cont.innerHTML = `
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <input readonly value="${esc(link)}" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12px;" onclick="this.select()" />
+        <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="copiarLinkPortal('${link}')">Copiar</button>
+      </div>
+      <div class="form-actions">
+        <button class="btn" style="background:var(--alert);" onclick="revogarLinkPortal()">Revogar acesso</button>
+        <button class="btn-ghost" onclick="gerarLinkPortal()">Gerar novo link</button>
+      </div>`;
+  } else {
+    cont.innerHTML = `<button class="btn" onclick="gerarLinkPortal()">+ Gerar link do portal</button>`;
+  }
+}
+
+async function gerarLinkPortal(){
+  const token = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+  const resultado = await sb.from('projetos').update({ portal_token: token }).eq('id', projetoAtualId);
+  if(checarErro(resultado, 'gerar link do portal')) return;
+  loadProjetoDetalhe(projetoAtualId);
+}
+async function revogarLinkPortal(){
+  if(!confirm('Isso desativa o link atual — quem tiver ele não conseguirá mais acessar. Continuar?')) return;
+  const resultado = await sb.from('projetos').update({ portal_token: null }).eq('id', projetoAtualId);
+  if(checarErro(resultado, 'revogar link do portal')) return;
+  loadProjetoDetalhe(projetoAtualId);
+}
+function copiarLinkPortal(link){
+  navigator.clipboard.writeText(link).then(() => alert('Link copiado!'));
 }
 
 async function atualizarStatusProjeto(status){
@@ -593,7 +673,7 @@ async function adicionarEtapa(e){
   e.preventDefault();
   const nome = document.getElementById('etNome').value.trim();
   if(!nome) return;
-  await sb.from('etapas').insert({
+  const resultado = await sb.from('etapas').insert({
     projeto_id: projetoAtualId,
     nome,
     ordem: 0,
@@ -603,15 +683,49 @@ async function adicionarEtapa(e){
     prioridade: document.getElementById('etPrioridade').value,
     bloqueado_por: document.getElementById('etBloqueadaPor').value || null,
     resumo: document.getElementById('etResumo').value.trim() || null,
+    tarefas_modelo: document.getElementById('etTarefasModelo').value.trim() || null,
   });
+  if(checarErro(resultado, 'adicionar etapa')) return;
   e.target.reset();
   loadProjetoDetalhe(projetoAtualId);
 }
 async function alternarEtapaStatus(id, statusAtual){
   const proximo = statusAtual==='pendente' ? 'em_andamento' : statusAtual==='em_andamento' ? 'concluida' : 'pendente';
-  await sb.from('etapas').update({ status: proximo }).eq('id', id);
+  const resultado = await sb.from('etapas').update({ status: proximo }).eq('id', id);
+  if(checarErro(resultado, 'atualizar etapa')) return;
+  if(proximo === 'concluida'){
+    await executarAutomacaoEtapa(id);
+  }
   loadProjetoDetalhe(projetoAtualId);
 }
+
+/* Quando uma etapa é concluída: libera (vira "em andamento") toda etapa que
+   dependia dela, e se essa etapa liberada tiver tarefas-modelo cadastradas
+   e ainda não geradas, cria essas tarefas automaticamente. */
+async function executarAutomacaoEtapa(etapaConcluidaId){
+  const { data: dependentes } = await sb
+    .from('etapas')
+    .select('id,status,tarefas_modelo,tarefas_geradas,projeto_id')
+    .eq('bloqueado_por', etapaConcluidaId);
+
+  for(const etapa of (dependentes||[])){
+    if(etapa.status === 'pendente'){
+      await sb.from('etapas').update({ status: 'em_andamento' }).eq('id', etapa.id);
+    }
+    if(etapa.tarefas_modelo && !etapa.tarefas_geradas){
+      const titulos = etapa.tarefas_modelo.split('\n').map(t => t.trim()).filter(Boolean);
+      if(titulos.length > 0){
+        await sb.from('tarefas').insert(titulos.map(titulo => ({
+          projeto_id: etapa.projeto_id,
+          etapa_id: etapa.id,
+          titulo,
+        })));
+        await sb.from('etapas').update({ tarefas_geradas: true }).eq('id', etapa.id);
+      }
+    }
+  }
+}
+
 async function excluirEtapa(id){
   await sb.from('etapas').delete().eq('id', id);
   loadProjetoDetalhe(projetoAtualId);
@@ -1227,6 +1341,44 @@ async function loadEquipe(){
     data:{ labels: dadosGrafico.map(d=>d.nome), datasets:[{ data: dadosGrafico.map(d=>d.horas), backgroundColor:'#C1602E' }]},
     options:{indexAxis:'y', plugins:{legend:{display:false}}, scales:{x:{grid:{color:'#EFEAE1'}},y:{grid:{display:false}}}}
   });
+
+  await renderHorasPorProjeto();
+}
+
+const CORES_PESSOA = ['#C1602E','#5C6E5A','#9C6B4F','#3E4A3E','#8B3A2B','#7A5C8E','#4A7A8C'];
+
+async function renderHorasPorProjeto(){
+  const { data: horas } = await sb.from('v_horas_projeto_pessoa').select('projeto_id,projeto_nome,equipe_id,equipe_nome,horas');
+  const registros = horas || [];
+
+  document.getElementById('tabelaHorasProjeto').innerHTML = registros.length===0
+    ? '<tr><td colspan="3" class="muted">Nenhum registro de cronômetro finalizado ainda.</td></tr>'
+    : registros.slice().sort((a,b) => b.horas - a.horas).map(r => `
+      <tr><td>${esc(r.projeto_nome)}</td><td>${esc(r.equipe_nome)}</td><td>${r.horas}h</td></tr>
+    `).join('');
+
+  const projetosUnicos = [...new Set(registros.map(r => r.projeto_nome))];
+  const pessoasUnicas = [...new Set(registros.map(r => r.equipe_nome))];
+
+  const datasets = pessoasUnicas.map((pessoa, i) => ({
+    label: pessoa,
+    data: projetosUnicos.map(proj => {
+      const reg = registros.find(r => r.projeto_nome===proj && r.equipe_nome===pessoa);
+      return reg ? reg.horas : 0;
+    }),
+    backgroundColor: CORES_PESSOA[i % CORES_PESSOA.length],
+  }));
+
+  if(charts.horasProjeto) charts.horasProjeto.destroy();
+  charts.horasProjeto = new Chart(document.getElementById('chartHorasProjeto'), {
+    type: 'bar',
+    data: { labels: projetosUnicos, datasets },
+    options: {
+      indexAxis: 'y',
+      plugins: { legend: { position:'bottom', labels:{ font:{ size:11 } } } },
+      scales: { x: { stacked:true, grid:{ color:'#EFEAE1' } }, y: { stacked:true, grid:{ display:false } } }
+    }
+  });
 }
 async function criarMembro(e){
   e.preventDefault();
@@ -1561,4 +1713,205 @@ async function criarIdeia(e){
 async function excluirIdeia(id){
   await sb.from('conteudo_ideias').delete().eq('id', id);
   loadIdeias();
+}
+
+/* ================= CRONOGRAMA (Gantt) ================= */
+const CORES_STATUS_GANTT = { pendente: 'var(--clay)', em_andamento: 'var(--terracotta)', concluida: 'var(--sage)' };
+const CORES_STATUS_GANTT_HEX = { pendente: '#9C6B4F', em_andamento: '#C1602E', concluida: '#5C6E5A' };
+
+async function loadCronograma(){
+  const { data: projetos } = await sb.from('projetos').select('id,nome,status').order('nome');
+  window._projetosGantt = projetos || [];
+
+  const sel = document.getElementById('ganttSeletor');
+  sel.innerHTML = '<option value="geral">Visão geral — todos os projetos</option>' +
+    (projetos||[]).map(p => `<option value="${p.id}">${esc(p.nome)}</option>`).join('');
+
+  renderCronograma();
+}
+
+function diasEntre(a, b){ return Math.round((b - a) / (1000*60*60*24)); }
+
+function montarGantt(itens, minDate, maxDate){
+  const cont = document.getElementById('ganttContainer');
+  const totalDias = Math.max(1, diasEntre(minDate, maxDate));
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const pctHoje = ((diasEntre(minDate, hoje) / totalDias) * 100).toFixed(2);
+
+  // Marcadores de mês
+  const meses = [];
+  let cursor = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+  while(cursor <= maxDate){
+    const pct = Math.max(0, (diasEntre(minDate, cursor) / totalDias) * 100);
+    meses.push({ label: `${MESES[cursor.getMonth()].slice(0,3)}/${String(cursor.getFullYear()).slice(2)}`, pct });
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth()+1, 1);
+  }
+
+  const linhasHtml = itens.map(item => {
+    const inicioPct = Math.max(0, (diasEntre(minDate, item.inicio) / totalDias) * 100);
+    const fimPct = Math.min(100, (diasEntre(minDate, item.fim) / totalDias) * 100);
+    const largura = Math.max(0.8, fimPct - inicioPct);
+    const cor = CORES_STATUS_GANTT[item.status] || 'var(--terracotta)';
+    return `<div class="gantt-row">
+      <div class="gantt-row-label" style="cursor:${item.onClick?'pointer':'default'};" ${item.onClick ? `onclick="${item.onClick}"` : ''}>
+        <p>${esc(item.nome)}</p>
+        <span>${item.sub ? esc(item.sub) : ''}</span>
+      </div>
+      <div class="gantt-track">
+        <div class="gantt-today" style="left:${pctHoje}%;"></div>
+        <div class="gantt-bar" title="${esc(item.nome)}: ${item.inicio.toLocaleDateString('pt-BR')} a ${item.fim.toLocaleDateString('pt-BR')}" style="left:${inicioPct}%;width:${largura}%;background:${cor};"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  cont.innerHTML = `
+    <div class="gantt-months">${meses.map(m => `<span class="gantt-month-tick" style="left:${m.pct}%;">${m.label}</span>`).join('')}</div>
+    ${linhasHtml}
+  `;
+}
+
+async function renderCronograma(){
+  const selecionado = document.getElementById('ganttSeletor').value;
+  const cont = document.getElementById('ganttContainer');
+  const aviso = document.getElementById('ganttAviso');
+  aviso.textContent = '';
+
+  if(selecionado === 'geral'){
+    const { data: projetos } = await sb.from('projetos').select('id,nome,status,data_inicio_obra,data_prevista,criado_em').neq('status','cancelado');
+    const comData = (projetos||[]).filter(p => p.data_prevista);
+    const semData = (projetos||[]).length - comData.length;
+    if(comData.length===0){
+      cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhum projeto com "Previsão de entrega" preenchida ainda — vá em cada projeto e complete essa data pra ela aparecer aqui.</p>';
+      return;
+    }
+    const itens = comData.map(p => ({
+      nome: p.nome,
+      sub: STATUS_PROJETO_LABEL[p.status] || p.status,
+      inicio: new Date(p.data_inicio_obra || p.criado_em),
+      fim: new Date(p.data_prevista + 'T00:00:00'),
+      status: p.status === 'concluido' ? 'concluida' : p.status === 'em_andamento' ? 'em_andamento' : 'pendente',
+      onClick: `navigate('projeto-detalhe',{projetoId:'${p.id}'})`,
+    }));
+    const minDate = new Date(Math.min(...itens.map(i => i.inicio)));
+    const maxDate = new Date(Math.max(...itens.map(i => i.fim)));
+    montarGantt(itens, minDate, maxDate);
+    if(semData>0) aviso.textContent = `${semData} projeto${semData>1?'s':''} sem "Previsão de entrega" preenchida não aparece aqui.`;
+  } else {
+    const { data: etapas } = await sb.from('etapas').select('nome,status,data_inicio,data_fim').eq('projeto_id', selecionado);
+    const comData = (etapas||[]).filter(e => e.data_inicio && e.data_fim);
+    const semData = (etapas||[]).length - comData.length;
+    if(comData.length===0){
+      cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhuma etapa desse projeto tem data de início E fim preenchidas ainda. Vá na aba Etapas do projeto e complete essas datas.</p>';
+      return;
+    }
+    const itens = comData.map(e => ({
+      nome: e.nome,
+      sub: e.status==='pendente'?'Pendente':e.status==='em_andamento'?'Em andamento':'Concluída',
+      inicio: new Date(e.data_inicio + 'T00:00:00'),
+      fim: new Date(e.data_fim + 'T00:00:00'),
+      status: e.status,
+    }));
+    const minDate = new Date(Math.min(...itens.map(i => i.inicio)));
+    const maxDate = new Date(Math.max(...itens.map(i => i.fim)));
+    montarGantt(itens, minDate, maxDate);
+    if(semData>0) aviso.textContent = `${semData} etapa${semData>1?'s':''} sem data de início/fim não aparece aqui.`;
+  }
+}
+
+/* ================= ANEXOS (projeto/etapa/tarefa) ================= */
+async function uploadAnexo(file){
+  if(!file) return null;
+  const ext = file.name.split('.').pop();
+  const nomeArquivo = `${crypto.randomUUID ? crypto.randomUUID() : Date.now()}.${ext}`;
+  const { error } = await sb.storage.from('anexos').upload(nomeArquivo, file);
+  if(error){ alert('Não consegui enviar o arquivo: ' + error.message); return null; }
+  const { data } = sb.storage.from('anexos').getPublicUrl(nomeArquivo);
+  return data?.publicUrl || null;
+}
+
+async function loadAnexos(){
+  const [{ data: anexos }, { data: etapas }, { data: tarefas }] = await Promise.all([
+    sb.from('anexos').select('id,nome_arquivo,url,etapa_id,tarefa_id,criado_em,etapas(nome),tarefas(titulo)').eq('projeto_id', projetoAtualId).order('criado_em',{ascending:false}),
+    sb.from('etapas').select('id,nome').eq('projeto_id', projetoAtualId),
+    sb.from('tarefas').select('id,titulo').eq('projeto_id', projetoAtualId),
+  ]);
+
+  const cont = document.getElementById('listaAnexos');
+  cont.innerHTML = (anexos||[]).length===0
+    ? '<p class="muted">Nenhum anexo ainda — envie plantas, contratos, PDFs...</p>'
+    : anexos.map(a => `
+      <div class="task-card" style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <a href="${esc(a.url)}" target="_blank" rel="noopener" style="font-size:13.5px;color:var(--ink);">📎 ${esc(a.nome_arquivo)}</a>
+          <div style="margin-top:4px;">
+            ${a.etapas?.nome ? `<span class="badge line">${esc(a.etapas.nome)}</span>` : ''}
+            ${a.tarefas?.titulo ? `<span class="badge line">${esc(a.tarefas.titulo)}</span>` : ''}
+          </div>
+        </div>
+        <button class="remove-link" onclick="excluirAnexo('${a.id}')">remover</button>
+      </div>`).join('');
+}
+
+async function adicionarAnexo(e){
+  e.preventDefault();
+  const arquivo = document.getElementById('anArquivo').files[0];
+  if(!arquivo){ alert('Escolha um arquivo primeiro.'); return; }
+
+  const url = await uploadAnexo(arquivo);
+  if(!url) return;
+
+  const resultado = await sb.from('anexos').insert({
+    projeto_id: projetoAtualId,
+    etapa_id: document.getElementById('anEtapa').value || null,
+    tarefa_id: document.getElementById('anTarefa').value || null,
+    nome_arquivo: arquivo.name,
+    url,
+  });
+  if(checarErro(resultado, 'salvar anexo')) return;
+  e.target.reset();
+  loadAnexos();
+}
+async function excluirAnexo(id){
+  await sb.from('anexos').delete().eq('id', id);
+  loadAnexos();
+}
+
+/* ================= MURAL DE RECADOS ================= */
+function renderRecados(recados){
+  const cont = document.getElementById('listaRecados');
+  if(recados.length===0){
+    cont.innerHTML = '<p class="muted" style="padding:4px;">Nenhum recado ainda — seja a primeira pessoa a deixar um "bom dia" por aqui. 👋</p>';
+    return;
+  }
+  cont.innerHTML = recados.map((r, i) => {
+    const d = new Date(r.criado_em);
+    const agora = new Date();
+    const mesmoDia = d.toDateString() === agora.toDateString();
+    const quando = mesmoDia
+      ? d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' })
+      : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+    return `<div class="recado ${i % 2 === 0 ? 'tom-a' : 'tom-b'}">
+      <div class="recado-topo">
+        <span class="recado-autor">${esc(r.autor_nome)}</span>
+        <span class="recado-hora">${quando} · <button class="btn-ghost" style="padding:0;font-size:11px;color:var(--graphite);" onclick="excluirRecado('${r.id}')">remover</button></span>
+      </div>
+      <p class="recado-texto">${esc(r.texto)}</p>
+    </div>`;
+  }).join('');
+}
+
+async function enviarRecado(e){
+  e.preventDefault();
+  const autor = document.getElementById('rcAutor').value.trim();
+  const texto = document.getElementById('rcTexto').value.trim();
+  if(!autor || !texto) return;
+  localStorage.setItem('sami_nome_recado', autor);
+  const resultado = await sb.from('mural_recados').insert({ autor_nome: autor, texto });
+  if(checarErro(resultado, 'enviar recado')) return;
+  document.getElementById('rcTexto').value = '';
+  loadInicio();
+}
+async function excluirRecado(id){
+  await sb.from('mural_recados').delete().eq('id', id);
+  loadInicio();
 }

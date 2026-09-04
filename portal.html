@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Acompanhamento do Projeto · SAMI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --paper:#F6F2EC; --ink:#211C18; --graphite:#5C554C; --line:#E3DACD;
+    --terracotta:#C1602E; --terracottaDark:#9C4A22;
+    --sage:#5C6E5A; --clay:#9C6B4F; --alert:#8B3A2B;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Inter',sans-serif;background:var(--paper);color:var(--ink);}
+  h1,h2{font-family:'Space Grotesk',sans-serif;}
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  .wrap{max-width:640px;margin:0 auto;padding:48px 24px 80px;}
+  .logo{width:64px;height:64px;object-fit:contain;margin-bottom:18px;}
+  .label{font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--graphite);margin:0 0 6px;}
+  h1{font-size:24px;margin:0 0 4px;}
+  .cliente{color:var(--graphite);font-size:14px;margin:0 0 24px;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px;box-shadow:0 1px 2px rgba(33,28,24,.04);margin-bottom:20px;}
+  .bar{height:9px;background:var(--line);overflow:hidden;border-radius:99px;}
+  .bar > div{height:100%;background:var(--terracotta);border-radius:99px;}
+  .pct{font-family:'Space Grotesk',sans-serif;font-size:28px;font-weight:700;color:var(--terracotta);margin:10px 0 2px;}
+  .etapa{padding:12px 0;border-bottom:1px solid var(--paper);}
+  .etapa:last-child{border-bottom:none;}
+  .etapa-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+  .etapa-nome{font-size:14px;font-weight:500;}
+  .etapa-status{font-size:11px;padding:2px 8px;border-radius:99px;}
+  .etapa-datas{font-size:11.5px;color:var(--graphite);margin-top:4px;}
+  .compromisso{padding:10px 0;border-bottom:1px solid var(--paper);font-size:13.5px;}
+  .compromisso:last-child{border-bottom:none;}
+  .compromisso .data{color:var(--terracotta);font-weight:600;font-family:'Space Grotesk',sans-serif;}
+  .footer{text-align:center;font-size:11px;color:var(--graphite);margin-top:40px;}
+  .estado{text-align:center;padding:60px 20px;color:var(--graphite);}
+</style>
+</head>
+<body>
+<div class="wrap" id="conteudo">
+  <div class="estado">Carregando...</div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://kyawrtkhgheqjgofjnti.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_-hD_wTqLCMlLQct3DBTFZw_UvIvLHap";
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtData(d){ return new Date(d+'T00:00:00').toLocaleDateString('pt-BR'); }
+function fmtDataHora(iso){
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+}
+
+const STATUS_LABEL = { pendente:'Pendente', em_andamento:'Em andamento', concluida:'Concluída',
+  em_andamento_projeto:'Em andamento', pausado:'Pausado', concluido:'Concluído', cancelado:'Cancelado' };
+const STATUS_COR = { pendente:'#9C6B4F', em_andamento:'#C1602E', concluida:'#5C6E5A' };
+
+async function iniciar(){
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token');
+  const cont = document.getElementById('conteudo');
+
+  if(!token){
+    cont.innerHTML = '<div class="estado">Link inválido — peça o link correto pro escritório da SAMI.</div>';
+    return;
+  }
+
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const { data, error } = await sb.rpc('portal_dados_projeto', { p_token: token });
+
+  if(error || !data){
+    cont.innerHTML = '<div class="estado">Não encontramos esse projeto. O link pode ter expirado — peça um novo pro escritório da SAMI.</div>';
+    return;
+  }
+
+  const p = data;
+  cont.innerHTML = `
+    <p class="label">SAMI · Arquitetura e Interiores</p>
+    <h1>${esc(p.nome)}</h1>
+    <p class="cliente">${esc(p.cliente || '')}${p.localizacao ? ' · ' + esc(p.localizacao) : ''}</p>
+
+    <div class="card">
+      <p class="label">Progresso geral</p>
+      <p class="pct">${p.percentual_execucao}%</p>
+      <div class="bar"><div style="width:${p.percentual_execucao}%"></div></div>
+      ${p.data_prevista ? `<p style="font-size:12.5px;color:var(--graphite);margin:10px 0 0;">Previsão de entrega: ${fmtData(p.data_prevista)}</p>` : ''}
+    </div>
+
+    <div class="card">
+      <p class="label" style="margin-bottom:14px;">Etapas do projeto</p>
+      ${(p.etapas||[]).length===0 ? '<p style="color:var(--graphite);font-size:13px;">Nenhuma etapa cadastrada ainda.</p>' : p.etapas.map(e => `
+        <div class="etapa">
+          <div class="etapa-top">
+            <span class="etapa-nome">${esc(e.nome)}</span>
+            <span class="etapa-status" style="color:${STATUS_COR[e.status]};background:${STATUS_COR[e.status]}22;">${STATUS_LABEL[e.status]||e.status}</span>
+          </div>
+          <div class="bar" style="height:5px;"><div style="width:${e.percentual_execucao}%;background:${STATUS_COR[e.status]};"></div></div>
+          ${e.data_inicio || e.data_fim ? `<p class="etapa-datas">${e.data_inicio?fmtData(e.data_inicio):'?'} → ${e.data_fim?fmtData(e.data_fim):'?'}</p>` : ''}
+        </div>`).join('')}
+    </div>
+
+    ${(p.proximos_compromissos||[]).length > 0 ? `
+    <div class="card">
+      <p class="label" style="margin-bottom:10px;">Próximos compromissos</p>
+      ${p.proximos_compromissos.map(c => `
+        <div class="compromisso">
+          <span class="data">${fmtDataHora(c.data_hora)}</span> — ${esc(c.titulo)}${c.local ? ' · ' + esc(c.local) : ''}
+        </div>`).join('')}
+    </div>` : ''}
+
+    <p class="footer">Essa é uma tela somente de acompanhamento. Qualquer dúvida, fale direto com a equipe da SAMI.</p>
+  `;
+}
+
+iniciar();
+</script>
+</body>
+</html>
