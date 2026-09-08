@@ -534,17 +534,19 @@ async function loadProjetoDetalhe(projetoId){
 
   const [
     { data: projeto }, { data: etapas }, { data: tarefas }, { data: parcelas },
-    { data: responsaveis }, { data: equipe }, { data: visitas }, { data: relatorios }, { data: execEtapas }
+    { data: responsaveis }, { data: equipe }, { data: visitas }, { data: relatorios }, { data: execEtapas },
+    { data: ambientes }
   ] = await Promise.all([
     sb.from('projetos').select('*, clientes(nome_completo)').eq('id', projetoId).single(),
     sb.from('etapas').select('*').eq('projeto_id', projetoId).order('ordem'),
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo').eq('projeto_id', projetoId).order('criado_em',{ascending:false}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,etapa_id,ambiente_id').eq('projeto_id', projetoId).order('criado_em',{ascending:false}),
     sb.from('financeiro_parcelas').select('id,descricao,valor,vencimento,status').eq('projeto_id', projetoId).order('vencimento'),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe(nome)'),
     sb.from('equipe').select('id,nome').eq('ativo', true).order('nome'),
     sb.from('registros_visita').select('*').eq('projeto_id', projetoId).order('data',{ascending:false}),
     sb.from('relatorios_obra').select('*').eq('projeto_id', projetoId).order('criado_em',{ascending:false}),
     sb.from('v_etapas_execucao').select('etapa_id,percentual_execucao,total_tarefas'),
+    sb.from('ambientes').select('*').eq('projeto_id', projetoId).order('ordem'),
   ]);
   if(!projeto) { navigate('projetos'); return; }
   dadosProjetoAtual = projeto;
@@ -570,6 +572,12 @@ async function loadProjetoDetalhe(projetoId){
   document.getElementById('etResponsavel').innerHTML = '<option value="">Sem responsável</option>' + (equipe||[]).map(m => `<option value="${m.id}">${esc(m.nome)}</option>`).join('');
   document.getElementById('etBloqueadaPor').innerHTML = '<option value="">Não depende de outra etapa</option>' + (etapas||[]).map(et => `<option value="${et.id}">${esc(et.nome)}</option>`).join('');
 
+  /* ---- Ambientes do projeto ---- */
+  window._ambientesProjeto = ambientes || [];
+  document.getElementById('listaAmbientes').innerHTML = (ambientes||[]).length===0
+    ? '<p class="muted" style="font-size:12.5px;">Nenhum ambiente cadastrado ainda.</p>'
+    : ambientes.map(a => `<span class="chip on" style="cursor:default;">${esc(a.nome)} <button onclick="excluirAmbiente('${a.id}')" style="background:none;border:none;color:inherit;cursor:pointer;font-size:12px;margin-left:4px;">×</button></span>`).join('');
+
   const PRIORIDADE_LABEL = { baixa:'Baixa', media:'Média', alta:'Alta' };
   const PRIORIDADE_COR = { baixa:'var(--sage)', media:'var(--clay)', alta:'var(--alert)' };
 
@@ -578,6 +586,35 @@ async function loadProjetoDetalhe(projetoId){
     : etapas.map(et => {
       const ex = execEtapaMap.get(et.id) || { percentual_execucao:0, total_tarefas:0 };
       const bloqueio = et.bloqueado_por ? etapaNomeMap.get(et.bloqueado_por) : null;
+      const tarefasDaEtapa = (tarefas||[]).filter(t => t.etapa_id === et.id);
+
+      const gruposChecklist = [...(ambientes||[]), { id:null, nome:'Geral' }]
+        .filter(amb => {
+          if(amb.id !== null) return true;
+          const itensGeral = tarefasDaEtapa.filter(t => !t.ambiente_id);
+          // "Geral" só some quando já existe pelo menos 1 ambiente cadastrado E não tem nada solto nele
+          return !((ambientes||[]).length > 0 && itensGeral.length === 0);
+        })
+        .map(amb => {
+        const itens = tarefasDaEtapa.filter(t => (t.ambiente_id||null) === amb.id);
+        return `<div class="checklist-ambiente">
+          <div class="checklist-ambiente-titulo">
+            <span>${esc(amb.nome)}</span>
+            <span class="mono" style="font-size:10px;color:var(--graphite);">${itens.filter(i=>i.status==='concluida').length}/${itens.length}</span>
+          </div>
+          ${itens.map(i => `
+            <div class="checklist-item">
+              <input type="checkbox" ${i.status==='concluida'?'checked':''} onchange="toggleChecklistItem('${i.id}', this.checked)" />
+              <span class="${i.status==='concluida'?'done':''}">${esc(i.titulo)}</span>
+              <button class="remove-link" onclick="excluirTarefaProjeto('${i.id}')">×</button>
+            </div>`).join('')}
+          <form class="checklist-add" onsubmit="adicionarItemChecklist(event,'${et.id}',${amb.id?`'${amb.id}'`:'null'})">
+            <input placeholder="+ item" />
+            <button class="btn-ghost" style="border:1px solid var(--line);border-radius:8px;">Add</button>
+          </form>
+        </div>`;
+      }).join('');
+
       return `<div class="task-card">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
           <button class="btn-ghost" style="text-align:left;padding:0;flex:1;" onclick="alternarEtapaStatus('${et.id}','${et.status}')">
@@ -595,7 +632,13 @@ async function loadProjetoDetalhe(projetoId){
           ${bloqueio ? `<span class="badge alert">Depende de: ${esc(bloqueio)}</span>` : ''}
         </div>
         ${et.resumo ? `<p style="font-size:12.5px;color:var(--graphite);margin:0 0 8px;">${esc(et.resumo)}</p>` : ''}
-        <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:8px;">
+
+        <div style="border-top:1px solid var(--line);padding-top:10px;margin-top:4px;">
+          <p class="mono" style="font-size:10.5px;text-transform:uppercase;color:var(--graphite);margin:0 0 8px;">Checklist</p>
+          ${gruposChecklist}
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:8px;margin-top:10px;">
           <span class="mono" style="font-size:10.5px;text-transform:uppercase;color:${et.termo_status==='assinado'?'var(--sage)':'var(--graphite)'};">Termo: ${et.termo_status==='assinado'?'Assinado':'Pendente'}</span>
           <div style="display:flex;gap:8px;">
             <button class="btn-ghost" style="font-size:11px;padding:0;" onclick="abrirTermoEtapa('${et.id}')">ver termo</button>
@@ -2135,4 +2178,41 @@ async function marcarDespesaPaga(id){
 async function excluirDespesa(id){
   await sb.from('despesas').delete().eq('id', id);
   loadDespesas();
+}
+
+/* ================= AMBIENTES + CHECKLIST POR AMBIENTE ================= */
+async function adicionarAmbiente(e){
+  e.preventDefault();
+  const nome = document.getElementById('ambNome').value.trim();
+  if(!nome) return;
+  const resultado = await sb.from('ambientes').insert({ projeto_id: projetoAtualId, nome, ordem: (window._ambientesProjeto||[]).length });
+  if(checarErro(resultado, 'adicionar ambiente')) return;
+  e.target.reset();
+  loadProjetoDetalhe(projetoAtualId);
+}
+async function excluirAmbiente(id){
+  if(!confirm('Remover esse ambiente? As tarefas que já estavam nele continuam existindo, só ficam sem ambiente vinculado.')) return;
+  await sb.from('ambientes').delete().eq('id', id);
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+async function toggleChecklistItem(tarefaId, marcado){
+  const resultado = await sb.from('tarefas').update({ status: marcado ? 'concluida' : 'pendente' }).eq('id', tarefaId);
+  if(checarErro(resultado, 'atualizar checklist')) return;
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+async function adicionarItemChecklist(e, etapaId, ambienteId){
+  e.preventDefault();
+  const input = e.target.querySelector('input');
+  const titulo = input.value.trim();
+  if(!titulo) return;
+  const resultado = await sb.from('tarefas').insert({
+    projeto_id: projetoAtualId,
+    etapa_id: etapaId,
+    ambiente_id: ambienteId || null,
+    titulo,
+  });
+  if(checarErro(resultado, 'adicionar item ao checklist')) return;
+  loadProjetoDetalhe(projetoAtualId);
 }
