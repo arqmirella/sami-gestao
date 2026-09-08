@@ -146,7 +146,7 @@
         <p class="label mono" style="margin:0;">Projetos em andamento</p>
         <button class="btn-ghost mono" style="font-size:11px;text-transform:uppercase;padding:0;" onclick="navigate('projetos')">ver todos ›</button>
       </div>
-      <div class="grid cards4" id="resumoProjetos" style="margin-bottom:32px;"></div>
+      <div class="grid projetos-grid" id="resumoProjetos" style="margin-bottom:32px;"></div>
 
       <div class="grid" style="grid-template-columns:1fr 1fr;gap:20px;">
         <div class="card">
@@ -218,7 +218,7 @@
             <button type="button" class="btn-ghost" onclick="toggleForm('formNovoProjeto', false)">Cancelar</button>
           </div>
         </form>
-        <div class="grid cards4" id="projetosGrid"></div>
+        <div class="grid projetos-grid" id="projetosGrid"></div>
       </div>
 
       <!-- Sub-aba: Tarefas -->
@@ -233,9 +233,14 @@
             <button type="button" class="chip" data-filtro="concluida" onclick="filtrarTarefas('concluida')">Concluída</button>
             <button type="button" class="chip" data-filtro="atrasada" onclick="filtrarTarefas('atrasada')">Atrasada</button>
           </div>
-          <div class="chip-select" style="margin:0;">
-            <button type="button" class="chip on" data-view-tarefa="kanban" onclick="alternarVisaoTarefas('kanban')">Kanban</button>
-            <button type="button" class="chip" data-view-tarefa="listaflat" onclick="alternarVisaoTarefas('listaflat')">Lista</button>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <select id="filtroAmbienteTarefas" onchange="filtrarAmbienteTarefas(this.value)" style="border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:12.5px;">
+              <option value="todos">Todos os ambientes</option>
+            </select>
+            <div class="chip-select" style="margin:0;">
+              <button type="button" class="chip on" data-view-tarefa="kanban" onclick="alternarVisaoTarefas('kanban')">Kanban</button>
+              <button type="button" class="chip" data-view-tarefa="listaflat" onclick="alternarVisaoTarefas('listaflat')">Lista</button>
+            </div>
           </div>
         </div>
 
@@ -302,9 +307,13 @@
         <div class="grid" style="grid-template-columns:repeat(2,1fr);gap:32px;">
           <div>
             <p class="col-label">Tarefas</p>
-            <form onsubmit="adicionarTarefaProjeto(event)" style="display:flex;gap:6px;margin-bottom:12px;">
-              <input id="tpTitulo" placeholder="Nova tarefa" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
-              <button class="btn" style="padding:8px 12px;">+</button>
+            <form onsubmit="adicionarTarefaProjeto(event)" class="form-box" style="max-width:100%;padding:12px;margin-bottom:12px;">
+              <input id="tpTitulo" required placeholder="Nova tarefa" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:8px;" />
+              <div style="display:flex;gap:6px;">
+                <select id="tpEtapa" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:12.5px;"><option value="">Sem etapa</option></select>
+                <select id="tpAmbiente" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:12.5px;"><option value="">Sem ambiente</option></select>
+                <button class="btn" style="padding:8px 12px;">+</button>
+              </div>
             </form>
             <div id="listaTarefasProjeto"></div>
           </div>
@@ -486,7 +495,6 @@
           <input id="clSindicoNome" placeholder="Nome do síndico" style="flex:1;" />
           <input id="clSindicoContato" placeholder="Contato do síndico" style="flex:1;" />
         </div>
-        <textarea id="clDocumentos" placeholder="Documentos/normas do condomínio" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
 
         <div class="form-actions">
           <button type="submit" class="btn">Salvar cliente</button>
@@ -717,7 +725,7 @@
           </form>
           <div class="card" style="padding:0;">
             <table>
-              <thead><tr><th>Nome / Função</th><th>Tarefas concl.</th><th>Tempo total</th><th>Status</th></tr></thead>
+              <thead><tr><th>Nome / Função</th><th>Tarefas concl.</th><th>Tempo total</th><th>Status</th><th></th></tr></thead>
               <tbody id="tabelaEquipe"></tbody>
             </table>
           </div>
@@ -746,6 +754,11 @@
 </div>
 
 <script src="script.js"></script>
+
+<!-- MODAL DE EDIÇÃO -->
+<div id="modalEditar" class="modal-overlay hidden" onclick="if(event.target===this) fecharModalEditar()">
+  <div class="modal-box" id="modalEditarConteudo"></div>
+</div>
 
 </body>
 </html>

@@ -382,18 +382,21 @@ function renderAniversarios(clientesAniv, equipeAniv){
   window._todosAniversarios = todos;
 
   const hoje = new Date(); hoje.setHours(0,0,0,0);
-  const comProxima = todos.map(a => ({ ...a, proxima: proximaOcorrenciaAniversario(a.data_nascimento) }))
-    .sort((a,b) => a.proxima - b.proxima)
-    .slice(0, 8);
+  const mesAtual = hoje.getMonth();
+
+  const doMes = todos
+    .filter(a => new Date(a.data_nascimento+'T00:00:00').getMonth() === mesAtual)
+    .map(a => ({ ...a, proxima: proximaOcorrenciaAniversario(a.data_nascimento) }))
+    .sort((a,b) => new Date(a.data_nascimento+'T00:00:00').getDate() - new Date(b.data_nascimento+'T00:00:00').getDate());
 
   const cont = document.getElementById('proximosAniversarios');
-  if(comProxima.length===0){
-    cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhum aniversário cadastrado ainda — adicione a data de nascimento em Clientes ou Equipe.</p>';
+  if(doMes.length===0){
+    cont.innerHTML = `<p class="muted" style="padding:16px;">Nenhum aniversário em ${MESES[mesAtual]}.</p>`;
     return;
   }
-  cont.innerHTML = comProxima.map(a => {
+  cont.innerHTML = doMes.map(a => {
     const diasFalta = diasEntre(hoje, a.proxima);
-    const emBreve = diasFalta <= DIAS_ALERTA_ANIVERSARIO;
+    const emBreve = diasFalta >= 0 && diasFalta <= DIAS_ALERTA_ANIVERSARIO;
     return `<div class="compromisso">
       <div class="compromisso-row">
         <div class="datebox"><p class="day">${a.proxima.toLocaleDateString('pt-BR',{day:'2-digit'})}</p><p class="mon">${a.proxima.toLocaleDateString('pt-BR',{month:'short'})}</p></div>
@@ -539,7 +542,7 @@ async function loadProjetoDetalhe(projetoId){
   ] = await Promise.all([
     sb.from('projetos').select('*, clientes(nome_completo)').eq('id', projetoId).single(),
     sb.from('etapas').select('*').eq('projeto_id', projetoId).order('ordem'),
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,etapa_id,ambiente_id').eq('projeto_id', projetoId).order('criado_em',{ascending:false}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,etapa_id,ambiente_id,ambientes(nome)').eq('projeto_id', projetoId).order('criado_em',{ascending:false}),
     sb.from('financeiro_parcelas').select('id,descricao,valor,vencimento,status').eq('projeto_id', projetoId).order('vencimento'),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe(nome)'),
     sb.from('equipe').select('id,nome').eq('ativo', true).order('nome'),
@@ -606,6 +609,7 @@ async function loadProjetoDetalhe(projetoId){
             <div class="checklist-item">
               <input type="checkbox" ${i.status==='concluida'?'checked':''} onchange="toggleChecklistItem('${i.id}', this.checked)" />
               <span class="${i.status==='concluida'?'done':''}">${esc(i.titulo)}</span>
+              <button class="edit-link" onclick="abrirModalEditarTarefa('${i.id}')">editar</button>
               <button class="remove-link" onclick="excluirTarefaProjeto('${i.id}')">×</button>
             </div>`).join('')}
           <form class="checklist-add" onsubmit="adicionarItemChecklist(event,'${et.id}',${amb.id?`'${amb.id}'`:'null'})">
@@ -621,7 +625,10 @@ async function loadProjetoDetalhe(projetoId){
             <span style="font-size:14px;color:var(--ink);font-weight:500;">${esc(et.nome)}</span>
             <span class="mono" style="font-size:10px;text-transform:uppercase;color:var(--graphite);display:block;margin-top:2px;">${et.status==='pendente'?'Pendente':et.status==='em_andamento'?'Em andamento':'Concluída'} · clique pra avançar</span>
           </button>
-          <button class="remove-link" onclick="excluirEtapa('${et.id}')">remover</button>
+          <div style="display:flex;gap:8px;flex-shrink:0;">
+            <button class="edit-link" onclick="abrirModalEditarEtapa('${et.id}')">editar</button>
+            <button class="remove-link" onclick="excluirEtapa('${et.id}')">remover</button>
+          </div>
         </div>
         <div class="bar" style="margin:10px 0 4px;"><div style="width:${ex.percentual_execucao}%"></div></div>
         <p class="barcaption" style="margin:0 0 8px;">${ex.percentual_execucao}% concluído${ex.total_tarefas?` · ${ex.total_tarefas} tarefas`:''}</p>
@@ -653,12 +660,20 @@ async function loadProjetoDetalhe(projetoId){
     ? '<p class="muted">Nenhuma tarefa ainda.</p>'
     : tarefas.map(t => {
       const resp = respPorTarefa.get(t.id) || [];
+      const nomeEtapa = t.etapa_id ? etapaNomeMap.get(t.etapa_id) : null;
       return `<div class="task-card">
         <div style="display:flex;justify-content:space-between;gap:8px;">
           <p class="task-title">${esc(t.titulo)}</p>
-          <button class="remove-link" onclick="excluirTarefaProjeto('${t.id}')">remover</button>
+          <div style="display:flex;gap:8px;flex-shrink:0;">
+            <button class="edit-link" onclick="abrirModalEditarTarefa('${t.id}')">editar</button>
+            <button class="remove-link" onclick="excluirTarefaProjeto('${t.id}')">remover</button>
+          </div>
         </div>
-        ${resp.length ? `<div style="margin:6px 0;">${resp.map(n=>`<span class="badge line">${esc(n)}</span>`).join('')}</div>` : ''}
+        <div style="margin:6px 0;">
+          ${nomeEtapa ? `<span class="badge line">📍 ${esc(nomeEtapa)}</span>` : ''}
+          ${t.ambientes?.nome ? `<span class="badge clay">${esc(t.ambientes.nome)}</span>` : ''}
+          ${resp.map(n=>`<span class="badge line">${esc(n)}</span>`).join('')}
+        </div>
         <div class="move-row" style="margin-top:8px;">
           <button onclick="moverTarefaProjeto('${t.id}','pendente')" style="${t.status==='pendente'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Pendente</button>
           <button onclick="moverTarefaProjeto('${t.id}','em_andamento')" style="${t.status==='em_andamento'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Andamento</button>
@@ -735,6 +750,11 @@ async function loadProjetoDetalhe(projetoId){
     (etapas||[]).map(et => `<option value="${et.id}">${esc(et.nome)}</option>`).join('');
   document.getElementById('anTarefa').innerHTML = '<option value="">Sem tarefa vinculada</option>' +
     (tarefas||[]).map(t => `<option value="${t.id}">${esc(t.titulo)}</option>`).join('');
+
+  document.getElementById('tpEtapa').innerHTML = '<option value="">Sem etapa</option>' +
+    (etapas||[]).map(et => `<option value="${et.id}">${esc(et.nome)}</option>`).join('');
+  document.getElementById('tpAmbiente').innerHTML = '<option value="">Sem ambiente</option>' +
+    (ambientes||[]).map(a => `<option value="${a.id}">${esc(a.nome)}</option>`).join('');
 
   renderPortalCliente(projeto);
 }
@@ -878,7 +898,13 @@ async function adicionarTarefaProjeto(e){
   e.preventDefault();
   const titulo = document.getElementById('tpTitulo').value.trim();
   if(!titulo) return;
-  await sb.from('tarefas').insert({ projeto_id: projetoAtualId, titulo });
+  const resultado = await sb.from('tarefas').insert({
+    projeto_id: projetoAtualId,
+    titulo,
+    etapa_id: document.getElementById('tpEtapa').value || null,
+    ambiente_id: document.getElementById('tpAmbiente').value || null,
+  });
+  if(checarErro(resultado, 'criar tarefa')) return;
   e.target.reset();
   loadProjetoDetalhe(projetoAtualId);
 }
@@ -1037,6 +1063,7 @@ const STATUS_TAREFA = [
 const STATUS_TAREFA_LABEL = { pendente:'A fazer', em_andamento:'Em andamento', concluida:'Concluída' };
 
 let filtroTarefaAtual = 'todas';
+let filtroAmbienteAtual = 'todos';
 let visaoTarefaAtual = 'kanban';
 
 async function loadTarefas(){
@@ -1050,7 +1077,7 @@ async function loadTarefas(){
   ).join('');
 
   const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }] = await Promise.all([
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,projetos(nome)').order('criado_em',{ascending:false}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,ambiente_id,projetos(nome),ambientes(nome)').order('criado_em',{ascending:false}),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id,equipe(nome)'),
     sb.from('tarefas_tempo').select('id,tarefa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
   ]);
@@ -1066,6 +1093,15 @@ async function loadTarefas(){
   window._tarefas = tarefas || [];
   window._respPorTarefa = respPorTarefa;
   window._tempoAbertoPorTarefa = new Map((temposAbertos||[]).map(t => [t.tarefa_id, t]));
+
+  const ambientesUnicos = new Map();
+  (tarefas||[]).forEach(t => { if(t.ambiente_id && t.ambientes?.nome) ambientesUnicos.set(t.ambiente_id, t.ambientes.nome); });
+  const selAmbiente = document.getElementById('filtroAmbienteTarefas');
+  const valorAtualSel = selAmbiente.value || 'todos';
+  selAmbiente.innerHTML = '<option value="todos">Todos os ambientes</option><option value="sem_ambiente">Sem ambiente</option>' +
+    Array.from(ambientesUnicos.entries()).map(([id,nome]) => `<option value="${id}">${esc(nome)}</option>`).join('');
+  selAmbiente.value = valorAtualSel;
+  if(selAmbiente.value !== valorAtualSel){ filtroAmbienteAtual = 'todos'; selAmbiente.value = 'todos'; }
 
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const limiteAlerta = new Date(hoje); limiteAlerta.setDate(limiteAlerta.getDate() + DIAS_ALERTA_PRAZO);
@@ -1101,6 +1137,10 @@ function filtrarTarefas(filtro){
   document.querySelectorAll('#filtroStatusTarefas .chip').forEach(c => c.classList.toggle('on', c.dataset.filtro===filtro));
   renderTarefas();
 }
+function filtrarAmbienteTarefas(valor){
+  filtroAmbienteAtual = valor;
+  renderTarefas();
+}
 function alternarVisaoTarefas(visao){
   visaoTarefaAtual = visao;
   document.querySelectorAll('[data-view-tarefa]').forEach(c => c.classList.toggle('on', c.dataset.viewTarefa===visao));
@@ -1113,6 +1153,10 @@ function tarefasFiltradas(){
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   return (window._tarefas||[]).filter(t => {
     const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
+    if(filtroAmbienteAtual!=='todos'){
+      if(filtroAmbienteAtual==='sem_ambiente' && t.ambiente_id) return false;
+      if(filtroAmbienteAtual!=='sem_ambiente' && t.ambiente_id!==filtroAmbienteAtual) return false;
+    }
     if(filtroTarefaAtual==='todas') return true;
     if(filtroTarefaAtual==='atrasada') return atrasada;
     return t.status===filtroTarefaAtual;
@@ -1146,10 +1190,13 @@ function renderKanbanTarefas(){
         const resp = respPorTarefa.get(t.id) || [];
         const tempoAberto = tempoAbertoPorTarefa.get(t.id);
         return `<div class="task-card${atrasada?' atrasada':''}">
-          <p class="label" style="margin-bottom:2px;">${esc(t.projetos?.nome||'')}</p>
+          <p class="label" style="margin-bottom:2px;">${esc(t.projetos?.nome||'')}${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p>
           <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;">
             <p class="task-title">${esc(t.titulo)}</p>
-            <button class="remove-link" onclick="excluirTarefaKanban('${t.id}')">remover</button>
+            <div style="display:flex;gap:8px;flex-shrink:0;">
+              <button class="edit-link" onclick="abrirModalEditarTarefa('${t.id}')">editar</button>
+              <button class="remove-link" onclick="excluirTarefaKanban('${t.id}')">remover</button>
+            </div>
           </div>
           <div style="margin-bottom:6px;">
             ${atrasada ? '<span class="badge alert">Atrasada</span>' : ''}
@@ -1158,12 +1205,21 @@ function renderKanbanTarefas(){
           </div>
           ${t.prazo ? `<p style="font-size:11px;margin:0 0 8px;color:${atrasada?'var(--alert)':'var(--graphite)'};">Prazo: ${fmtDataBR(t.prazo)}</p>` : ''}
           ${tempoAberto
-            ? `<button class="timer-btn running" onclick="pararCronometro('${tempoAberto.id}')">● Parar cronômetro (${esc(tempoAberto.equipe?.nome||'')})</button>`
-            : `<div style="display:flex;gap:4px;margin-bottom:8px;">
-                <select id="sel-eq-${t.id}" style="flex:1;font-size:11px;border:1px solid var(--line);">
-                  ${(window._equipeAtiva||[]).map(m => `<option value="${m.id}">${esc(m.nome)}</option>`).join('')}
-                </select>
-                <button class="btn" style="font-size:10px;padding:5px 8px;" onclick="iniciarCronometro('${t.id}')">Iniciar</button>
+            ? `<div class="timer-box running">
+                <p class="timer-box-label"><span class="timer-dot"></span>Cronômetro rodando</p>
+                <div class="timer-running-info">
+                  <span class="timer-running-text"><b>${esc(tempoAberto.equipe?.nome||'')}</b> · desde ${new Date(tempoAberto.inicio).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
+                  <button class="timer-stop" onclick="pararCronometro('${tempoAberto.id}')">■ Parar</button>
+                </div>
+              </div>`
+            : `<div class="timer-box">
+                <p class="timer-box-label"><span class="timer-dot"></span>Cronômetro</p>
+                <div class="timer-row">
+                  <select id="sel-eq-${t.id}" class="timer-select">
+                    ${(window._equipeAtiva||[]).map(m => `<option value="${m.id}">${esc(m.nome)}</option>`).join('')}
+                  </select>
+                  <button class="timer-go" onclick="iniciarCronometro('${t.id}')">▶ Iniciar</button>
+                </div>
               </div>`}
           <div class="move-row">
             ${STATUS_TAREFA.filter(c=>c.status!==col.status).map(c => `<button onclick="moverTarefaKanban('${t.id}','${c.status}')">→ ${c.label}</button>`).join('')}
@@ -1188,17 +1244,18 @@ function renderListaFlatTarefas(){
   if(tarefasVisiveis.length===0){ cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhuma tarefa nesse filtro.</p>'; return; }
 
   cont.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:12px;padding:10px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;color:var(--graphite);border-bottom:1px solid var(--line);">
-      <span>Tarefa / Projeto</span><span>Responsáveis</span><span>Prazo</span><span>Status</span>
+    <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:12px;padding:10px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;color:var(--graphite);border-bottom:1px solid var(--line);">
+      <span>Tarefa / Projeto</span><span>Responsáveis</span><span>Prazo</span><span>Status</span><span></span>
     </div>
     ${tarefasVisiveis.map(t => {
       const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
       const resp = (respPorTarefa.get(t.id) || []).join(', ');
-      return `<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:12px;padding:11px 18px;align-items:center;border-bottom:1px solid var(--line);font-size:13.5px;">
-        <div><p style="margin:0;">${esc(t.titulo)}</p><p style="margin:2px 0 0;font-size:11.5px;color:var(--graphite);">${esc(t.projetos?.nome||'')}</p></div>
+      return `<div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:12px;padding:11px 18px;align-items:center;border-bottom:1px solid var(--line);font-size:13.5px;">
+        <div><p style="margin:0;">${esc(t.titulo)}</p><p style="margin:2px 0 0;font-size:11.5px;color:var(--graphite);">${esc(t.projetos?.nome||'')}${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p></div>
         <span style="font-size:12px;color:var(--graphite);">${esc(resp)||'—'}</span>
         <span style="font-size:12px;color:${atrasada?'var(--alert)':'var(--graphite)'};white-space:nowrap;">${t.prazo?fmtDataBR(t.prazo):'—'}</span>
         <span class="pill" style="color:${atrasada?'var(--alert)':STATUS_PILL_COR[t.status]};border-color:${atrasada?'var(--alert)':STATUS_PILL_COR[t.status]};white-space:nowrap;">${atrasada?'Atrasada':STATUS_TAREFA_LABEL[t.status]}</span>
+        <button class="edit-link" onclick="abrirModalEditarTarefa('${t.id}')">editar</button>
       </div>`;
     }).join('')}
   `;
@@ -1520,6 +1577,7 @@ async function loadEquipe(){
         <td>${p?.tarefas_concluidas || 0}</td>
         <td>${fmtHoras(p?.tempo_total_segundos || 0)}</td>
         <td><button class="pill" style="color:${m.ativo?'var(--sage)':'var(--graphite)'};border-color:${m.ativo?'var(--sage)':'var(--line)'};" onclick="alternarAtivoMembro('${m.id}', ${m.ativo})">${m.ativo?'Ativo':'Inativo'}</button></td>
+        <td><button class="remove-link" onclick="excluirMembro('${m.id}','${esc(m.nome).replace(/'/g,"\\'")}')">excluir</button></td>
       </tr>`;
     }).join('');
 
@@ -1584,6 +1642,12 @@ async function criarMembro(e){
   loadEquipe();
 }
 async function alternarAtivoMembro(id, ativo){ await sb.from('equipe').update({ ativo: !ativo }).eq('id', id); loadEquipe(); }
+async function excluirMembro(id, nome){
+  if(!confirm(`Excluir "${nome}" da equipe? Isso também apaga o histórico de cronômetro e as vinculações de tarefas dela — se quiser manter o histórico de horas trabalhadas, prefira marcar como "Inativo" em vez de excluir.`)) return;
+  const resultado = await sb.from('equipe').delete().eq('id', id);
+  if(checarErro(resultado, 'excluir pessoa')) return;
+  loadEquipe();
+}
 
 /* ================= CLIENTES ================= */
 async function loadClientes(){
@@ -1622,7 +1686,6 @@ async function criarCliente(e){
     obra_endereco: v('clObraEndereco')||null,
     zelador_nome: v('clZeladorNome')||null, zelador_contato: v('clZeladorContato')||null,
     sindico_nome: v('clSindicoNome')||null, sindico_contato: v('clSindicoContato')||null,
-    documentos_condominio: v('clDocumentos')||null,
   });
   if(checarErro(resultado, 'cadastrar cliente')) return;
   e.target.reset();
@@ -1665,7 +1728,7 @@ async function loadClienteDetalhe(clienteId){
     <p class="label" style="margin-top:20px;">Informações da obra</p>
     <table>
       ${linha('Endereço', c.obra_endereco)}${linha('Zelador', c.zelador_nome)}${linha('Contato do zelador', c.zelador_contato)}
-      ${linha('Síndico', c.sindico_nome)}${linha('Contato do síndico', c.sindico_contato)}${linha('Documentos/normas', c.documentos_condominio)}
+      ${linha('Síndico', c.sindico_nome)}${linha('Contato do síndico', c.sindico_contato)}
     </table>`;
 }
 async function excluirClienteAtual(){
@@ -2214,5 +2277,118 @@ async function adicionarItemChecklist(e, etapaId, ambienteId){
     titulo,
   });
   if(checarErro(resultado, 'adicionar item ao checklist')) return;
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+/* ================= MODAL DE EDIÇÃO ================= */
+function abrirModal(html){
+  document.getElementById('modalEditarConteudo').innerHTML = html;
+  document.getElementById('modalEditar').classList.remove('hidden');
+}
+function fecharModalEditar(){
+  document.getElementById('modalEditar').classList.add('hidden');
+  document.getElementById('modalEditarConteudo').innerHTML = '';
+}
+function recarregarAposEdicao(){
+  if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
+  loadTarefas();
+}
+
+/* ---- Editar tarefa ---- */
+async function abrirModalEditarTarefa(tarefaId){
+  const { data: tarefa } = await sb.from('tarefas').select('*').eq('id', tarefaId).single();
+  if(!tarefa) return;
+
+  const { data: ambientesProjeto } = await sb.from('ambientes').select('id,nome').eq('projeto_id', tarefa.projeto_id);
+
+  abrirModal(`
+    <p class="label" style="margin-bottom:14px;">Editar tarefa</p>
+    <form onsubmit="salvarEdicaoTarefa(event,'${tarefaId}')">
+      <input id="edTarTitulo" required value="${esc(tarefa.titulo)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Prazo</label>
+      <input id="edTarPrazo" type="date" value="${tarefa.prazo || ''}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Ambiente</label>
+      <select id="edTarAmbiente" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;">
+        <option value="">Sem ambiente</option>
+        ${(ambientesProjeto||[]).map(a => `<option value="${a.id}" ${a.id===tarefa.ambiente_id?'selected':''}>${esc(a.nome)}</option>`).join('')}
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--graphite);margin-bottom:16px;">
+        <input id="edTarTerceirizado" type="checkbox" ${tarefa.terceirizado?'checked':''} /> Terceirizado
+      </label>
+      <div class="form-actions">
+        <button type="submit" class="btn">Salvar</button>
+        <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+      </div>
+    </form>
+  `);
+}
+
+async function salvarEdicaoTarefa(e, tarefaId){
+  e.preventDefault();
+  const resultado = await sb.from('tarefas').update({
+    titulo: document.getElementById('edTarTitulo').value.trim(),
+    prazo: document.getElementById('edTarPrazo').value || null,
+    ambiente_id: document.getElementById('edTarAmbiente').value || null,
+    terceirizado: document.getElementById('edTarTerceirizado').checked,
+  }).eq('id', tarefaId);
+  if(checarErro(resultado, 'editar tarefa')) return;
+  fecharModalEditar();
+  recarregarAposEdicao();
+}
+
+/* ---- Editar etapa ---- */
+async function abrirModalEditarEtapa(etapaId){
+  const [{ data: etapa }, { data: equipe }, { data: etapasProjeto }] = await Promise.all([
+    sb.from('etapas').select('*').eq('id', etapaId).single(),
+    sb.from('equipe').select('id,nome').eq('ativo', true).order('nome'),
+    sb.from('etapas').select('id,nome').eq('projeto_id', projetoAtualId),
+  ]);
+  if(!etapa) return;
+
+  abrirModal(`
+    <p class="label" style="margin-bottom:14px;">Editar etapa</p>
+    <form onsubmit="salvarEdicaoEtapa(event,'${etapaId}')">
+      <input id="edEtNome" required value="${esc(etapa.nome)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <input id="edEtDataInicio" type="date" value="${etapa.data_inicio||''}" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" title="Início" />
+        <input id="edEtDataFim" type="date" value="${etapa.data_fim||''}" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" title="Fim" />
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <select id="edEtResponsavel" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;">
+          <option value="">Sem responsável</option>
+          ${(equipe||[]).map(m => `<option value="${m.id}" ${m.id===etapa.responsavel_id?'selected':''}>${esc(m.nome)}</option>`).join('')}
+        </select>
+        <select id="edEtPrioridade" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;">
+          <option value="baixa" ${etapa.prioridade==='baixa'?'selected':''}>Prioridade baixa</option>
+          <option value="media" ${etapa.prioridade==='media'?'selected':''}>Prioridade média</option>
+          <option value="alta" ${etapa.prioridade==='alta'?'selected':''}>Prioridade alta</option>
+        </select>
+      </div>
+      <select id="edEtBloqueadaPor" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;">
+        <option value="">Não depende de outra etapa</option>
+        ${(etapasProjeto||[]).filter(e=>e.id!==etapaId).map(e => `<option value="${e.id}" ${e.id===etapa.bloqueado_por?'selected':''}>${esc(e.nome)}</option>`).join('')}
+      </select>
+      <textarea id="edEtResumo" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:16px;">${esc(etapa.resumo||'')}</textarea>
+      <div class="form-actions">
+        <button type="submit" class="btn">Salvar</button>
+        <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+      </div>
+    </form>
+  `);
+}
+
+async function salvarEdicaoEtapa(e, etapaId){
+  e.preventDefault();
+  const resultado = await sb.from('etapas').update({
+    nome: document.getElementById('edEtNome').value.trim(),
+    data_inicio: document.getElementById('edEtDataInicio').value || null,
+    data_fim: document.getElementById('edEtDataFim').value || null,
+    responsavel_id: document.getElementById('edEtResponsavel').value || null,
+    prioridade: document.getElementById('edEtPrioridade').value,
+    bloqueado_por: document.getElementById('edEtBloqueadaPor').value || null,
+    resumo: document.getElementById('edEtResumo').value.trim() || null,
+  }).eq('id', etapaId);
+  if(checarErro(resultado, 'editar etapa')) return;
+  fecharModalEditar();
   loadProjetoDetalhe(projetoAtualId);
 }
