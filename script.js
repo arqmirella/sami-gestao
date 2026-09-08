@@ -605,7 +605,11 @@ async function loadProjetoDetalhe(projetoId){
   window._ambientesProjeto = ambientes || [];
   document.getElementById('listaAmbientes').innerHTML = (ambientes||[]).length===0
     ? '<p class="muted" style="font-size:12.5px;">Nenhum ambiente cadastrado ainda.</p>'
-    : ambientes.map(a => `<span class="chip on" style="cursor:default;">${esc(a.nome)} <button onclick="excluirAmbiente('${a.id}')" style="background:none;border:none;color:inherit;cursor:pointer;font-size:12px;margin-left:4px;">×</button></span>`).join('');
+    : ambientes.map(a => `<span class="chip on" style="cursor:default;">
+        ${esc(a.nome)}
+        <button onclick="duplicarAmbiente('${a.id}','${esc(a.nome).replace(/'/g,"\\'")}')" title="Duplicar com o checklist inteiro" style="background:none;border:none;color:inherit;cursor:pointer;font-size:11px;margin-left:6px;">⧉</button>
+        <button onclick="excluirAmbiente('${a.id}')" style="background:none;border:none;color:inherit;cursor:pointer;font-size:12px;margin-left:2px;">×</button>
+      </span>`).join('');
 
   const PRIORIDADE_LABEL = { baixa:'Baixa', media:'Média', alta:'Alta' };
   const PRIORIDADE_COR = { baixa:'var(--sage)', media:'var(--clay)', alta:'var(--alert)' };
@@ -2302,6 +2306,31 @@ async function adicionarAmbiente(e){
 async function excluirAmbiente(id){
   if(!confirm('Remover esse ambiente? As tarefas que já estavam nele continuam existindo, só ficam sem ambiente vinculado.')) return;
   await sb.from('ambientes').delete().eq('id', id);
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+async function duplicarAmbiente(ambienteId, nomeAtual){
+  const novoNome = prompt('Nome do novo ambiente:', `${nomeAtual} (cópia)`);
+  if(!novoNome || !novoNome.trim()) return;
+
+  const { data: novoAmbiente, error: erroAmb } = await sb.from('ambientes')
+    .insert({ projeto_id: projetoAtualId, nome: novoNome.trim(), ordem: (window._ambientesProjeto||[]).length })
+    .select('id').single();
+  if(checarErro({ error: erroAmb }, 'duplicar ambiente')) return;
+
+  // Pega o checklist inteiro do ambiente original (em todas as etapas) e recria no novo,
+  // zerado (pendente), já que é um ambiente novo.
+  const { data: itensOrigem } = await sb.from('tarefas').select('titulo, etapa_id').eq('ambiente_id', ambienteId);
+  if(itensOrigem && itensOrigem.length > 0){
+    const resultado = await sb.from('tarefas').insert(itensOrigem.map(item => ({
+      projeto_id: projetoAtualId,
+      etapa_id: item.etapa_id,
+      ambiente_id: novoAmbiente.id,
+      titulo: item.titulo,
+    })));
+    if(checarErro(resultado, 'copiar checklist do ambiente')) return;
+  }
+
   loadProjetoDetalhe(projetoAtualId);
 }
 
