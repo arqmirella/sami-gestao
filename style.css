@@ -40,7 +40,7 @@
 
   /* Generic */
   .grid{display:grid;gap:20px;}
-  .cards4{grid-template-columns:repeat(4,1fr);}
+  .cards4{grid-template-columns:repeat(auto-fit,minmax(190px,1fr));}
   .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow-sm);}
   .label{font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--graphite);margin:0 0 4px;}
   .muted{color:var(--graphite);font-size:14px;}
@@ -166,3 +166,75 @@
   .recado-autor{font-weight:600;font-size:13px;}
   .recado-hora{font-size:11px;color:var(--graphite);}
   .recado-texto{font-size:13.5px;margin:0;white-space:pre-wrap;}
+
+  /* ============================================================
+     RESPONSIVO — celular (iPhone) e ajustes gerais de tela
+     ============================================================ */
+
+  .mobile-topbar{display:none;}
+  .mobile-overlay{display:none;}
+
+  @media (max-width: 860px){
+
+    /* Barra superior fixa com o botão de menu */
+    .mobile-topbar{
+      display:flex; align-items:center; gap:10px;
+      position:fixed; top:0; left:0; right:0; height:56px;
+      background:#fff; border-bottom:1px solid var(--line);
+      z-index:120; padding:0 14px;
+    }
+    .mobile-topbar-logo{width:28px;height:28px;object-fit:contain;}
+    .mobile-topbar-title{font-family:'IBM Plex Mono',monospace;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);}
+    .mobile-menu-btn{
+      width:38px;height:38px;border:1px solid var(--line);border-radius:9px;
+      background:#fff;font-size:17px;color:var(--ink);flex-shrink:0;
+    }
+
+    /* App vira coluna única; a barra lateral vira gaveta */
+    #appScreen{display:block;}
+    main{padding:16px;padding-top:72px;max-width:100%;}
+
+    aside{
+      position:fixed; top:0; left:0; height:100vh; width:78%; max-width:290px;
+      transform:translateX(-100%); transition:transform .22s ease;
+      z-index:130; box-shadow:0 0 0 100vmax rgba(0,0,0,0); background:var(--paper);
+      padding-top:70px;
+    }
+    aside.open{transform:translateX(0);}
+    .mobile-overlay.open{
+      display:block; position:fixed; inset:0; background:rgba(33,28,24,.45); z-index:125;
+    }
+
+    /* Toda grade vira coluna única — inclusive as que têm largura
+       definida por estilo embutido em telas específicas */
+    .grid, .kanban{grid-template-columns:1fr !important;}
+    .inicio-top-grid{gap:14px;}
+    .quick-actions{flex-direction:row;flex-wrap:wrap;}
+    .qa-btn{flex:1;min-width:150px;text-align:center;padding:12px;}
+
+    h1{font-size:19px;}
+    .card{padding:16px;}
+    main .search-wrap{max-width:100%;margin-bottom:18px;}
+
+    /* Tabelas: em vez de espremer, deixa rolar de lado */
+    .card:has(table){overflow-x:auto;}
+    table{min-width:560px;}
+
+    /* Cronograma (Gantt): rótulo menor pra sobrar espaço pra barra */
+    .gantt-row-label{width:120px;}
+    .gantt-months{margin-left:120px;}
+
+    /* Botões de formulário ocupando a largura toda, mais fáceis de tocar */
+    .form-box{max-width:100% !important;}
+    .btn, .qa-btn, .chip{min-height:38px;}
+  }
+
+  @media (max-width: 480px){
+    .cards4{grid-template-columns:1fr 1fr;}
+    .hero .time{font-size:26px;}
+  }
+
+  /* Telas grandes: evita que os cards fiquem esparsos demais */
+  @media (min-width: 1600px){
+    main{padding-left:80px;padding-right:80px;}
+  }

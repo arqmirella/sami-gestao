@@ -9,6 +9,14 @@ const SUPABASE_ANON_KEY = "sb_publishable_-hD_wTqLCMlLQct3DBTFZw_UvIvLHap";
    na tela Início (veja o passo a passo que te mandei pra pegar esse endereço).
    Deixe em branco ("") se não quiser usar isso. */
 const GOOGLE_CALENDAR_EMAIL = "samiarquitetura@gmail.com";
+
+/* Com quantos dias de antecedência avisar que uma tarefa está perto do prazo
+   (além do aviso de "já venceu"). Mude esse número quando quiser. */
+const DIAS_ALERTA_PRAZO = 3;
+
+/* Com quantos dias de antecedência destacar um aniversário chegando (de
+   cliente ou da equipe) como "em breve" na tela Início. */
+const DIAS_ALERTA_ANIVERSARIO = 15;
 /* ====================================================================== */
 
 let sb;
@@ -87,12 +95,23 @@ function navigate(view, opts){
   if(view==='projetos') trocarAbaProjetosModulo(opts.subaba || 'dashboard');
   if(view==='clientes') loadClientes();
   if(view==='conteudo') loadConteudo();
-  if(view==='financeiro') loadFinanceiro();
+  if(view==='financeiro') trocarAbaFinanceiro('fluxo');
   if(view==='fornecedores') loadFornecedores();
   if(view==='orcamentos') loadOrcamentos();
   if(view==='equipe') loadEquipe();
   if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId);
   if(view==='cliente-detalhe' && opts.clienteId) loadClienteDetalhe(opts.clienteId);
+  fecharMenuMobile();
+  window.scrollTo(0, 0);
+}
+
+function toggleMenuMobile(){
+  document.getElementById('sidebarAside').classList.toggle('open');
+  document.getElementById('mobileOverlay').classList.toggle('open');
+}
+function fecharMenuMobile(){
+  document.getElementById('sidebarAside')?.classList.remove('open');
+  document.getElementById('mobileOverlay')?.classList.remove('open');
 }
 
 function acaoRapida(view, formId){
@@ -125,25 +144,29 @@ async function loadDashboardProjetos(){
   const totalProjetos = (projetos||[]).length;
   const emAndamento = (projetos||[]).filter(p => p.status==='em_andamento').length;
   const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const limiteAlerta = new Date(hoje); limiteAlerta.setDate(limiteAlerta.getDate() + DIAS_ALERTA_PRAZO);
   const atrasadas = (tarefas||[]).filter(t => t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje);
+  const vencendoEmBreve = (tarefas||[]).filter(t => t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') >= hoje && new Date(t.prazo+'T00:00:00') <= limiteAlerta);
   const concluidas = (tarefas||[]).filter(t => t.status==='concluida');
   const pendentes = (tarefas||[]).filter(t => t.status==='pendente');
 
   document.getElementById('dashProjetosStats').innerHTML = `
     <div class="card"><p class="label">Projetos</p><p style="font-size:22px;font-weight:600;font-family:'Space Grotesk',sans-serif;">${totalProjetos}</p></div>
     <div class="card"><p class="label">Em andamento</p><p style="font-size:22px;font-weight:600;font-family:'Space Grotesk',sans-serif;color:var(--terracotta);">${emAndamento}</p></div>
+    <div class="card"><p class="label">Vencendo em ${DIAS_ALERTA_PRAZO} dias</p><p style="font-size:22px;font-weight:600;font-family:'Space Grotesk',sans-serif;color:var(--clay);">${vencendoEmBreve.length}</p></div>
     <div class="card"><p class="label">Tarefas atrasadas</p><p style="font-size:22px;font-weight:600;font-family:'Space Grotesk',sans-serif;color:var(--alert);">${atrasadas.length}</p></div>
-    <div class="card"><p class="label">Tarefas concluídas</p><p style="font-size:22px;font-weight:600;font-family:'Space Grotesk',sans-serif;color:var(--sage);">${concluidas.length}</p></div>
   `;
 
   const proximas = (tarefas||[]).filter(t => t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') >= hoje).slice(0,7);
   document.getElementById('dashProximasEntregas').innerHTML = proximas.length===0
     ? '<p class="muted" style="font-size:13px;">Nenhuma entrega prevista.</p>'
-    : proximas.map(t => `
-      <div class="quicklink-item" style="cursor:pointer;" onclick="navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})">
+    : proximas.map(t => {
+      const pertoDoPrazo = new Date(t.prazo+'T00:00:00') <= limiteAlerta;
+      return `<div class="quicklink-item" style="cursor:pointer;" onclick="navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})">
         <span>${esc(t.titulo)} <span class="sub" style="color:var(--graphite);">· ${esc(t.projetos?.nome||'')}</span></span>
-        <span class="badge line">${fmtDataBR(t.prazo)}</span>
-      </div>`).join('');
+        <span class="badge ${pertoDoPrazo?'clay':'line'}">${fmtDataBR(t.prazo)}</span>
+      </div>`;
+    }).join('');
 
   document.getElementById('dashTarefasAtrasadas').innerHTML = atrasadas.length===0
     ? '<p class="muted" style="font-size:13px;">Nenhuma tarefa atrasada. 🎉</p>'
@@ -187,7 +210,7 @@ async function loadInicio(){
   const nomeSalvo = localStorage.getItem('sami_nome_recado');
   if(nomeSalvo) document.getElementById('rcAutor').value = nomeSalvo;
 
-  const [{ data: compromissos }, { data: projetos }, { data: execucao }, { data: linksRede }, { data: linksConhecimento }, { data: tarefasHoje }, { data: recados }] = await Promise.all([
+  const [{ data: compromissos }, { data: projetos }, { data: execucao }, { data: linksRede }, { data: linksConhecimento }, { data: tarefasHoje }, { data: recados }, { data: clientesAniv }, { data: equipeAniv }] = await Promise.all([
     sb.from('compromissos').select('id, titulo, data_hora, local, projeto_id, projetos(nome)').order('data_hora', { ascending: true }),
     sb.from('projetos').select('id,nome,cliente,cliente_id,status,capa_url,clientes(nome_completo)').eq('status','em_andamento').order('criado_em',{ascending:false}).limit(4),
     sb.from('v_projetos_execucao').select('projeto_id,percentual_execucao,total_tarefas'),
@@ -195,6 +218,8 @@ async function loadInicio(){
     sb.from('links_rapidos').select('*').eq('categoria','conhecimento').order('ordem'),
     sb.from('tarefas').select('id,titulo,status,prazo,projeto_id,projetos(nome)').neq('status','concluida').order('prazo',{ascending:true}),
     sb.from('mural_recados').select('id,autor_nome,texto,criado_em').order('criado_em',{ascending:false}).limit(20),
+    sb.from('clientes').select('nome_completo,data_nascimento').not('data_nascimento','is',null),
+    sb.from('equipe').select('nome,data_nascimento').eq('ativo',true).not('data_nascimento','is',null),
   ]);
 
   window._compromissos = compromissos || [];
@@ -204,6 +229,7 @@ async function loadInicio(){
   renderLinksRapidos(linksRede||[], linksConhecimento||[]);
   renderTarefasHoje(tarefasHoje||[]);
   renderRecados(recados||[]);
+  renderAniversarios(clientesAniv||[], equipeAniv||[]);
   renderGoogleAgenda();
 }
 
@@ -313,6 +339,10 @@ async function excluirLinkRapido(id){
 function renderCalendario(){
   document.getElementById('calTitulo').textContent = `${MESES[mesRef.getMonth()]} ${mesRef.getFullYear()}`;
   const compromissosPorDia = new Set((window._compromissos||[]).map(c => chaveDia(new Date(c.data_hora))));
+  const aniversariosPorDiaMes = new Set((window._todosAniversarios||[]).map(a => {
+    const d = new Date(a.data_nascimento+'T00:00:00');
+    return `${d.getMonth()}-${d.getDate()}`;
+  }));
   const primeiroDia = new Date(mesRef.getFullYear(), mesRef.getMonth(), 1).getDay();
   const totalDias = new Date(mesRef.getFullYear(), mesRef.getMonth()+1, 0).getDate();
   const hoje = new Date();
@@ -322,13 +352,59 @@ function renderCalendario(){
     const dataAtual = new Date(mesRef.getFullYear(), mesRef.getMonth(), d);
     const ehHoje = chaveDia(dataAtual) === chaveDia(hoje);
     const temCompromisso = compromissosPorDia.has(chaveDia(dataAtual));
-    html += `<div class="cal-day${ehHoje?' today':''}">${d}${temCompromisso && !ehHoje ? '<span class="cal-dot"></span>' : ''}</div>`;
+    const temAniversario = aniversariosPorDiaMes.has(`${mesRef.getMonth()}-${d}`);
+    const dots = (temCompromisso || temAniversario) && !ehHoje
+      ? `<span style="display:flex;gap:2px;">${temCompromisso?'<span class="cal-dot" style="position:static;"></span>':''}${temAniversario?'<span class="cal-dot" style="position:static;background:var(--clay);"></span>':''}</span>`
+      : '';
+    html += `<div class="cal-day${ehHoje?' today':''}">${d}${dots}</div>`;
   }
   document.getElementById('calGrid').innerHTML = html;
 }
 function mudarMes(delta){
   mesRef = new Date(mesRef.getFullYear(), mesRef.getMonth()+delta, 1);
   renderCalendario();
+}
+
+/* Aniversários: calcula a próxima ocorrência (esse ano ou o que vem) */
+function proximaOcorrenciaAniversario(dataNascStr){
+  const nasc = new Date(dataNascStr+'T00:00:00');
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  let proxima = new Date(hoje.getFullYear(), nasc.getMonth(), nasc.getDate());
+  if(proxima < hoje) proxima = new Date(hoje.getFullYear()+1, nasc.getMonth(), nasc.getDate());
+  return proxima;
+}
+
+function renderAniversarios(clientesAniv, equipeAniv){
+  const todos = [
+    ...clientesAniv.map(c => ({ nome: c.nome_completo, data_nascimento: c.data_nascimento, tipo: 'Cliente' })),
+    ...equipeAniv.map(e => ({ nome: e.nome, data_nascimento: e.data_nascimento, tipo: 'Equipe' })),
+  ];
+  window._todosAniversarios = todos;
+
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const comProxima = todos.map(a => ({ ...a, proxima: proximaOcorrenciaAniversario(a.data_nascimento) }))
+    .sort((a,b) => a.proxima - b.proxima)
+    .slice(0, 8);
+
+  const cont = document.getElementById('proximosAniversarios');
+  if(comProxima.length===0){
+    cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhum aniversário cadastrado ainda — adicione a data de nascimento em Clientes ou Equipe.</p>';
+    return;
+  }
+  cont.innerHTML = comProxima.map(a => {
+    const diasFalta = diasEntre(hoje, a.proxima);
+    const emBreve = diasFalta <= DIAS_ALERTA_ANIVERSARIO;
+    return `<div class="compromisso">
+      <div class="compromisso-row">
+        <div class="datebox"><p class="day">${a.proxima.toLocaleDateString('pt-BR',{day:'2-digit'})}</p><p class="mon">${a.proxima.toLocaleDateString('pt-BR',{month:'short'})}</p></div>
+        <div>
+          <p style="font-size:14px;margin:0;">🎂 ${esc(a.nome)}</p>
+          <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${a.tipo}</p>
+        </div>
+      </div>
+      ${emBreve ? `<span class="badge clay">${diasFalta===0?'Hoje!':diasFalta+' dia'+(diasFalta>1?'s':'')}</span>` : ''}
+    </div>`;
+  }).join('');
 }
 
 function renderCompromissos(){
@@ -949,14 +1025,27 @@ async function loadTarefas(){
   window._tempoAbertoPorTarefa = new Map((temposAbertos||[]).map(t => [t.tarefa_id, t]));
 
   const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const limiteAlerta = new Date(hoje); limiteAlerta.setDate(limiteAlerta.getDate() + DIAS_ALERTA_PRAZO);
   const atrasadas = window._tarefas.filter(t => t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje);
+  const vencendoEmBreve = window._tarefas.filter(t => t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') >= hoje && new Date(t.prazo+'T00:00:00') <= limiteAlerta);
   const alertaEl = document.getElementById('alertaAtrasadas');
+
+  let htmlAlerta = '';
   if(atrasadas.length>0){
-    alertaEl.classList.remove('hidden');
-    alertaEl.innerHTML = `<p class="label mono">${atrasadas.length===1?'1 tarefa fora do prazo':atrasadas.length+' tarefas fora do prazo'}</p>
-      <ul style="margin:6px 0 0;padding-left:18px;">
+    htmlAlerta += `<p class="label mono">${atrasadas.length===1?'1 tarefa fora do prazo':atrasadas.length+' tarefas fora do prazo'}</p>
+      <ul style="margin:6px 0 14px;padding-left:18px;">
         ${atrasadas.map(t => `<li>${esc(t.titulo)} — ${esc(t.projetos?.nome||'')} · venceu em ${fmtDataBR(t.prazo)}</li>`).join('')}
       </ul>`;
+  }
+  if(vencendoEmBreve.length>0){
+    htmlAlerta += `<p class="label mono" style="color:var(--clay);">${vencendoEmBreve.length===1?'1 tarefa vencendo':vencendoEmBreve.length+' tarefas vencendo'} nos próximos ${DIAS_ALERTA_PRAZO} dias</p>
+      <ul style="margin:6px 0 0;padding-left:18px;">
+        ${vencendoEmBreve.map(t => `<li>${esc(t.titulo)} — ${esc(t.projetos?.nome||'')} · vence em ${fmtDataBR(t.prazo)}</li>`).join('')}
+      </ul>`;
+  }
+  if(htmlAlerta){
+    alertaEl.classList.remove('hidden');
+    alertaEl.innerHTML = htmlAlerta;
   } else {
     alertaEl.classList.add('hidden');
   }
@@ -1119,7 +1208,64 @@ function statusEfetivo(p){
   return new Date(p.vencimento+'T00:00:00') < hoje ? 'atrasado' : 'pendente';
 }
 
-async function loadFinanceiro(){
+function trocarAbaFinanceiro(tab){
+  document.querySelectorAll('.fin-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'fintab-'+tab));
+  document.querySelectorAll('.fin-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
+  if(tab==='fluxo') loadFluxoCaixa();
+  if(tab==='receber') loadContasReceber();
+  if(tab==='despesas') loadDespesas();
+}
+
+function statusEfetivoGenerico(item){
+  if(item.status==='pago') return 'pago';
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  return new Date(item.vencimento+'T00:00:00') < hoje ? 'atrasado' : 'pendente';
+}
+
+async function loadFluxoCaixa(){
+  const [{ data: parcelas }, { data: despesas }] = await Promise.all([
+    sb.from('financeiro_parcelas').select('valor,vencimento,status'),
+    sb.from('despesas').select('valor,vencimento,status'),
+  ]);
+
+  let entradas = 0;
+  (parcelas||[]).forEach(p => { if(statusEfetivoGenerico(p)==='pago') entradas += Number(p.valor); });
+  let saidas = 0;
+  (despesas||[]).forEach(d => { if(statusEfetivoGenerico(d)==='pago') saidas += Number(d.valor); });
+  const saldo = entradas - saidas;
+
+  document.getElementById('fluxoResumo').innerHTML = `
+    <div class="card"><p class="label">Entradas (recebido)</p><p style="font-size:20px;font-weight:600;color:${CORES.pago};">${fmtMoeda(entradas)}</p></div>
+    <div class="card"><p class="label">Saídas (pago)</p><p style="font-size:20px;font-weight:600;color:${CORES.atrasado};">${fmtMoeda(saidas)}</p></div>
+    <div class="card"><p class="label">Saldo</p><p style="font-size:20px;font-weight:600;color:${saldo>=0?CORES.pago:CORES.atrasado};">${fmtMoeda(saldo)}</p></div>`;
+
+  const meses = new Map();
+  const addAoMes = (dataStr, campo, valor) => {
+    const d = new Date(dataStr+'T00:00:00');
+    const chave = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const label = d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+    const atual = meses.get(chave) || { mes:label, entradas:0, saidas:0 };
+    atual[campo] += valor;
+    meses.set(chave, atual);
+  };
+  (parcelas||[]).forEach(p => { if(statusEfetivoGenerico(p)==='pago') addAoMes(p.vencimento, 'entradas', Number(p.valor)); });
+  (despesas||[]).forEach(d => { if(statusEfetivoGenerico(d)==='pago') addAoMes(d.vencimento, 'saidas', Number(d.valor)); });
+
+  const dadosMeses = Array.from(meses.entries()).sort(([a],[b]) => a.localeCompare(b)).map(([,v]) => v);
+
+  if(charts.fluxo) charts.fluxo.destroy();
+  charts.fluxo = new Chart(document.getElementById('chartFluxo'), {
+    type:'bar',
+    data:{ labels: dadosMeses.map(d=>d.mes),
+      datasets:[
+        { label:'Entradas', data: dadosMeses.map(d=>d.entradas), backgroundColor: CORES.pago },
+        { label:'Saídas', data: dadosMeses.map(d=>d.saidas), backgroundColor: CORES.atrasado },
+      ]},
+    options:{responsive:true, plugins:{legend:{labels:{font:{size:11}}}}, scales:{x:{grid:{display:false}},y:{grid:{color:'#EFEAE1'}}}}
+  });
+}
+
+async function loadContasReceber(){
   document.getElementById('fgProjeto').dataset.opcional = 'false';
   await preencherSelectProjetos('fgProjeto');
 
@@ -1384,7 +1530,12 @@ async function criarMembro(e){
   e.preventDefault();
   const nome = document.getElementById('eqNome').value.trim();
   if(!nome) return;
-  await sb.from('equipe').insert({ nome, funcao: document.getElementById('eqFuncao').value.trim() || null });
+  const resultado = await sb.from('equipe').insert({
+    nome,
+    funcao: document.getElementById('eqFuncao').value.trim() || null,
+    data_nascimento: document.getElementById('eqNascimento').value || null,
+  });
+  if(checarErro(resultado, 'cadastrar pessoa')) return;
   e.target.reset();
   toggleForm('formEquipe', false);
   loadEquipe();
@@ -1914,4 +2065,74 @@ async function enviarRecado(e){
 async function excluirRecado(id){
   await sb.from('mural_recados').delete().eq('id', id);
   loadInicio();
+}
+
+/* ================= DESPESAS (saídas) ================= */
+async function loadDespesas(){
+  document.getElementById('dpProjeto').dataset.opcional = 'true';
+  await preencherSelectProjetos('dpProjeto');
+
+  const { data: despesas } = await sb
+    .from('despesas')
+    .select('id,descricao,categoria,valor,vencimento,status,projeto_id,projetos(nome)')
+    .order('vencimento', { ascending: true });
+  window._despesas = despesas || [];
+
+  let pago=0, pendente=0, atrasado=0;
+  window._despesas.forEach(d => {
+    const s = statusEfetivoGenerico(d);
+    if(s==='pago') pago += Number(d.valor);
+    else if(s==='atrasado') atrasado += Number(d.valor);
+    else pendente += Number(d.valor);
+  });
+  const total = pago+pendente+atrasado;
+
+  document.getElementById('despesasResumo').innerHTML = `
+    <div class="card"><p class="label">Total geral</p><p style="font-size:18px;font-weight:600;">${fmtMoeda(total)}</p></div>
+    <div class="card"><p class="label">Pago</p><p style="font-size:18px;font-weight:600;color:${CORES.pago};">${fmtMoeda(pago)}</p></div>
+    <div class="card"><p class="label">Pendente</p><p style="font-size:18px;font-weight:600;color:${CORES.pendente};">${fmtMoeda(pendente)}</p></div>
+    <div class="card"><p class="label">Atrasado</p><p style="font-size:18px;font-weight:600;color:${CORES.atrasado};">${fmtMoeda(atrasado)}</p></div>`;
+
+  document.getElementById('tabelaDespesas').innerHTML = window._despesas.length===0
+    ? '<tr><td colspan="5" class="muted">Nenhuma despesa lançada ainda.</td></tr>'
+    : window._despesas.map(d => {
+      const s = statusEfetivoGenerico(d);
+      return `<tr>
+        <td><p style="margin:0;">${esc(d.descricao)}</p><p style="margin:2px 0 0;font-size:11px;color:var(--graphite);">${esc(d.categoria||'')}${d.projetos?.nome ? ' · '+esc(d.projetos.nome) : ''}</p></td>
+        <td>${fmtDataBR(d.vencimento)}</td>
+        <td>${fmtMoeda(d.valor)}</td>
+        <td>${s==='pago'
+          ? `<span class="pill" style="color:${CORES.pago};border-color:${CORES.pago};">Pago</span>`
+          : `<button class="pill" style="color:${CORES[s]};border-color:${CORES[s]};" onclick="marcarDespesaPaga('${d.id}')">${s==='atrasado'?'Atrasado':'Pendente'} · marcar pago</button>`}
+        </td>
+        <td><button class="remove-link" onclick="excluirDespesa('${d.id}')">remover</button></td>
+      </tr>`;
+    }).join('');
+}
+
+async function criarDespesa(e){
+  e.preventDefault();
+  const descricao = document.getElementById('dpDescricao').value.trim();
+  const valor = document.getElementById('dpValor').value;
+  const vencimento = document.getElementById('dpVencimento').value;
+  if(!descricao || !valor || !vencimento) return;
+  const resultado = await sb.from('despesas').insert({
+    descricao,
+    categoria: document.getElementById('dpCategoria').value.trim() || null,
+    projeto_id: document.getElementById('dpProjeto').value || null,
+    valor: Number(valor.replace(',', '.')),
+    vencimento,
+  });
+  if(checarErro(resultado, 'lançar despesa')) return;
+  e.target.reset();
+  toggleForm('formNovaDespesa', false);
+  loadDespesas();
+}
+async function marcarDespesaPaga(id){
+  await sb.from('despesas').update({ status:'pago' }).eq('id', id);
+  loadDespesas();
+}
+async function excluirDespesa(id){
+  await sb.from('despesas').delete().eq('id', id);
+  loadDespesas();
 }

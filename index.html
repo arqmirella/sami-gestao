@@ -38,7 +38,14 @@
 
 <!-- APP -->
 <div id="appScreen">
-  <aside>
+  <div class="mobile-topbar">
+    <button class="mobile-menu-btn" onclick="toggleMenuMobile()" aria-label="Abrir menu">☰</button>
+    <img src="logo-sami.png" alt="SAMI" class="mobile-topbar-logo" />
+    <span class="mobile-topbar-title">SAMI · Gestão</span>
+  </div>
+  <div id="mobileOverlay" class="mobile-overlay" onclick="toggleMenuMobile()"></div>
+
+  <aside id="sidebarAside">
     <div>
       <img src="logo-sami.png" alt="SAMI Arquitetura e Interiores" class="sidebar-logo" />
       <div class="brand">SAMI · Gestão</div>
@@ -66,7 +73,7 @@
 
     <!-- INÍCIO -->
     <section id="view-inicio">
-      <div class="grid" style="grid-template-columns:0.85fr 1fr auto;align-items:stretch;margin-bottom:24px;">
+      <div class="grid inicio-top-grid" style="grid-template-columns:0.85fr 1fr auto;align-items:stretch;margin-bottom:24px;">
         <div class="hero hero-compact">
           <div>
             <p class="mono" id="heroDia" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;opacity:.85;"></p>
@@ -127,6 +134,11 @@
         <button class="btn-ghost mono" style="font-size:11px;text-transform:uppercase;padding:0;" onclick="navigate('projetos',{subaba:'tarefas'})">ver todas ›</button>
       </div>
       <div class="card" id="tarefasHoje" style="padding:0;margin-bottom:32px;"></div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <p class="label mono" style="margin:0;">Próximos aniversários</p>
+      </div>
+      <div class="card" id="proximosAniversarios" style="padding:0;margin-bottom:32px;"></div>
 
       <div id="blocoGoogleAgenda" style="margin-bottom:32px;"></div>
 
@@ -559,30 +571,74 @@
     <!-- FINANCEIRO -->
     <section id="view-financeiro" class="hidden">
       <h1>Financeiro</h1>
-      <div class="grid cards4" id="financeiroResumo" style="margin-bottom:24px;"></div>
-      <div class="grid" style="grid-template-columns:2fr 1fr;margin-bottom:24px;">
-        <div class="chartbox"><p class="label">Por mês (vencimento)</p><canvas id="chartMes" height="150"></canvas></div>
-        <div class="chartbox"><p class="label">Distribuição</p><canvas id="chartStatus" height="150"></canvas></div>
+
+      <div class="chip-select" style="margin-bottom:24px;">
+        <button type="button" class="chip fin-tab on" data-tab="fluxo" onclick="trocarAbaFinanceiro('fluxo')">Fluxo de caixa</button>
+        <button type="button" class="chip fin-tab" data-tab="receber" onclick="trocarAbaFinanceiro('receber')">A receber</button>
+        <button type="button" class="chip fin-tab" data-tab="despesas" onclick="trocarAbaFinanceiro('despesas')">Despesas</button>
       </div>
-      <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaParcela')">+ Lançar parcela</button>
-      <form id="formNovaParcela" class="form-box hidden" onsubmit="criarParcelaGlobal(event)">
-        <input id="fgDescricao" placeholder="Descrição" />
-        <select id="fgProjeto"></select>
-        <div style="display:flex;gap:10px;">
-          <input id="fgValor" required placeholder="Valor" style="flex:1;" />
-          <input id="fgVencimento" type="date" required style="flex:1;" />
+
+      <!-- Sub-aba: Fluxo de caixa -->
+      <div id="fintab-fluxo" class="fin-tabcontent">
+        <div class="grid cards4" id="fluxoResumo" style="margin-bottom:24px;"></div>
+        <div class="chartbox">
+          <p class="label">Entradas x Saídas por mês</p>
+          <canvas id="chartFluxo" height="140"></canvas>
         </div>
-        <input id="fgForma" placeholder="Forma de pagamento (opcional)" style="margin-top:10px;" />
-        <div class="form-actions">
-          <button type="submit" class="btn">Salvar parcela</button>
-          <button type="button" class="btn-ghost" onclick="toggleForm('formNovaParcela', false)">Cancelar</button>
+      </div>
+
+      <!-- Sub-aba: A receber -->
+      <div id="fintab-receber" class="fin-tabcontent hidden">
+        <div class="grid cards4" id="financeiroResumo" style="margin-bottom:24px;"></div>
+        <div class="grid" style="grid-template-columns:2fr 1fr;margin-bottom:24px;">
+          <div class="chartbox"><p class="label">Por mês (vencimento)</p><canvas id="chartMes" height="150"></canvas></div>
+          <div class="chartbox"><p class="label">Distribuição</p><canvas id="chartStatus" height="150"></canvas></div>
         </div>
-      </form>
-      <div class="card" style="padding:0;">
-        <table>
-          <thead><tr><th>Descrição / Projeto</th><th>Vencimento</th><th>Valor</th><th>Status</th><th></th></tr></thead>
-          <tbody id="tabelaParcelas"></tbody>
-        </table>
+        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaParcela')">+ Lançar parcela</button>
+        <form id="formNovaParcela" class="form-box hidden" onsubmit="criarParcelaGlobal(event)">
+          <input id="fgDescricao" placeholder="Descrição" />
+          <select id="fgProjeto"></select>
+          <div style="display:flex;gap:10px;">
+            <input id="fgValor" required placeholder="Valor" style="flex:1;" />
+            <input id="fgVencimento" type="date" required style="flex:1;" />
+          </div>
+          <input id="fgForma" placeholder="Forma de pagamento (opcional)" style="margin-top:10px;" />
+          <div class="form-actions">
+            <button type="submit" class="btn">Salvar parcela</button>
+            <button type="button" class="btn-ghost" onclick="toggleForm('formNovaParcela', false)">Cancelar</button>
+          </div>
+        </form>
+        <div class="card" style="padding:0;">
+          <table>
+            <thead><tr><th>Descrição / Projeto</th><th>Vencimento</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+            <tbody id="tabelaParcelas"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Sub-aba: Despesas -->
+      <div id="fintab-despesas" class="fin-tabcontent hidden">
+        <div class="grid cards4" id="despesasResumo" style="margin-bottom:24px;"></div>
+        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaDespesa')">+ Lançar despesa</button>
+        <form id="formNovaDespesa" class="form-box hidden" onsubmit="criarDespesa(event)">
+          <input id="dpDescricao" required placeholder="Descrição (ex: Aluguel do escritório)" />
+          <input id="dpCategoria" placeholder="Categoria (ex: Aluguel, Material, Freelancer)" />
+          <select id="dpProjeto" data-opcional="true"><option value="">Despesa geral (não é de um projeto)</option></select>
+          <div style="display:flex;gap:10px;">
+            <input id="dpValor" required placeholder="Valor" style="flex:1;" />
+            <input id="dpVencimento" type="date" required style="flex:1;" />
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn">Salvar despesa</button>
+            <button type="button" class="btn-ghost" onclick="toggleForm('formNovaDespesa', false)">Cancelar</button>
+          </div>
+        </form>
+        <div class="card" style="padding:0;">
+          <table>
+            <thead><tr><th>Descrição / Categoria</th><th>Vencimento</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+            <tbody id="tabelaDespesas"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -640,6 +696,8 @@
           <form id="formEquipe" class="form-box hidden" onsubmit="criarMembro(event)">
             <input id="eqNome" required placeholder="Nome" />
             <input id="eqFuncao" placeholder="Função (ex: Arquiteta, Estagiário)" />
+            <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Data de nascimento (opcional)</label>
+            <input id="eqNascimento" type="date" style="margin-bottom:10px;" />
             <div class="form-actions">
               <button type="submit" class="btn">Salvar</button>
               <button type="button" class="btn-ghost" onclick="toggleForm('formEquipe', false)">Cancelar</button>
