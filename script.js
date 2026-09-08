@@ -554,6 +554,7 @@ function trocarAbaProjeto(tab){
   document.querySelectorAll('.pd-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'pdtab-'+tab));
   document.querySelectorAll('.pd-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
   if(tab==='anexos') loadAnexos();
+  if(tab==='checklist') loadChecklistRevisao();
 }
 
 async function loadProjetoDetalhe(projetoId){
@@ -2553,4 +2554,266 @@ async function duplicarProjetoAtual(){
 
   await duplicarEstruturaProjeto(projetoAtualId, novoProjeto.id);
   navigate('projeto-detalhe', { projetoId: novoProjeto.id });
+}
+
+/* ================= CHECKLIST DE REVISÃO — PROJETO EXECUTIVO ================= */
+const CHECKLIST_REVISAO_TEMPLATE = [
+  ['01 · Planta de Reforma', null, [
+    'Medidas conferem com o levantamento.',
+    'Todas as paredes existentes representadas.',
+    'Esquadrias conferem com o levantamento.',
+    'Níveis existentes conferem.',
+    'Pé-direito confere.',
+    'Todos os elementos a demolir estão indicados.',
+    'Não existem demolições faltantes.',
+    'Não existem demolições desnecessárias.',
+    'Pisos a remover identificados.',
+    'Revestimentos a remover identificados.',
+    'Forros a remover identificados.',
+    'Novas alvenarias dimensionadas e identificadas.',
+  ]],
+  ['02 · Forro de Gesso e Luminotécnica', 'Forro de gesso', [
+    'Todos os rebaixos possuem cotas.', 'Altura do forro indicada.', 'Tabicas dimensionadas.',
+    'Cortineiros dimensionados.', 'Sancas corretamente representadas.', 'Detalhes compatíveis com vistas.',
+    'Compatível com marcenaria.', 'Compatível com ar-condicionado.',
+  ]],
+  ['02 · Forro de Gesso e Luminotécnica', 'Luminotécnica', [
+    'Todos os pontos possuem código.', 'Quantidade de luminárias confere.', 'Tipo de luminária correto.',
+    'Temperatura de cor informada.', 'Potência informada.', 'Modelo especificado.',
+    'Distâncias entre luminárias conferidas.', 'Eixos de instalação conferidos.', 'Pendentes centralizados.',
+    'Perfis de LED cotados.', 'Fitas de LED especificadas.',
+  ]],
+  ['02 · Forro de Gesso e Luminotécnica', 'Circuitos', [
+    'Todos os circuitos identificados.', 'Circuitos numerados corretamente.',
+    'Interruptores compatíveis com os circuitos.', 'Acionamentos conferidos.',
+    'Circuitos iguais nas vistas.', 'Circuitos iguais na planta elétrica.',
+  ]],
+  ['03 · Planta Elétrica', 'Tomadas', [
+    'Quantidade de tomadas suficiente.', 'Alturas das tomadas informadas.', 'Distâncias conferidas.',
+    'Tomadas compatíveis com marcenaria e layout.', 'Tomadas especiais identificadas (20A, 10A etc.).',
+    'Tomadas 20A identificadas.', 'Não há tomadas atrás de portas.',
+  ]],
+  ['03 · Planta Elétrica', 'Interruptores', [
+    'Alturas informadas.', 'Número de teclas indicado.', 'Acionamentos corretos.',
+    'Compatíveis com os circuitos.', 'Não há interruptores atrás de portas.', 'Localização compatível com o layout.',
+  ]],
+  ['03 · Planta Elétrica', 'Pontos especiais', [
+    'Ponto de internet indicado.', 'Ponto de TV indicado.', 'Interfone indicado.',
+    'Infra para ar-condicionado indicada.', 'Eletrocalha indicada quando necessário.',
+    'Infra de automação (quando houver).', 'Carregadores USB (quando houver).',
+  ]],
+  ['03 · Planta Elétrica', 'Compatibilização', [
+    'Nenhuma tomada atrás de marcenaria.', 'Nenhuma tomada atrás de espelhos ou quadros.',
+    'Alturas compatíveis em todas as vistas.', 'Circuitos compatíveis com luminotécnica.',
+    'Compatível com equipamentos.', 'Compatível com layout.',
+  ]],
+  ['03 · Planta Elétrica', 'Alimentações', [
+    'Alimentação de equipamentos especiais indicada.',
+    'Potências / cargas especiais identificadas quando necessárias.',
+    'Pontos de bancada conferidos com equipamentos.',
+    'Infraestrutura prevista para futuras instalações relevantes.',
+  ]],
+  ['03 · Planta Elétrica', 'Conferência documental', [
+    'Legenda elétrica atualizada.', 'Quadro / identificação de circuitos atualizados.',
+    'Simbologia padronizada.', 'Notas e observações conferidas.',
+  ]],
+  ['04 · Marcenaria', 'Compatibilização', [
+    'Medidas gerais conferidas.', 'Compatível com layout.', 'Compatível com elétrica.',
+    'Compatível com marmoraria.', 'Compatível com equipamentos.',
+  ]],
+  ['04 · Marcenaria', 'Detalhamento', [
+    'Folgas de portas e gavetas.', 'Ferragens especificadas.', 'MDF especificado.',
+    'Acabamentos conferidos.', 'Nichos cotados.', 'Torre quente conferida.',
+    'Painéis detalhados.', 'Rodapés da marcenaria.',
+  ]],
+  ['05 · Marmoraria', null, [
+    'Bancadas conferidas.', 'Espessuras.', 'Saia.', 'Frontão.', 'Rodabanca.', 'Cubas.',
+    'Recortes.', 'Cooktop.', 'Torre de tomadas.', 'Acabamentos chanfrados.',
+    'Conferência com manual dos equipamentos.', 'Encontros e emendas detalhados.',
+  ]],
+  ['06 · Revestimentos', 'Paginação', [
+    'Início do assentamento.', 'Sentido das peças.', 'Junta.', 'Rejunte.', 'Perfis metálicos.',
+    'Soleiras.', 'Escadas.', 'Continuidade entre ambientes.', 'Compatibilidade com vistas.',
+  ]],
+  ['06 · Revestimentos', 'Conferência adicional', [
+    'Peças especiais identificadas.', 'Encontros entre materiais definidos.',
+    'Recortes relevantes indicados.', 'Espessuras consideradas nos encontros.',
+    'Áreas molhadas com caimentos / ralos compatíveis.', 'Compatibilidade com portas e esquadrias.',
+  ]],
+  ['07 · Pintura', null, [
+    'Cores definidas.', 'Marcas especificadas.', 'Acabamento informado.',
+    'Teste de tinta realizado / validado.', 'Áreas identificadas.', 'Compatibilidade com memorial.',
+    'Transições entre cores / materiais definidas.',
+  ]],
+  ['08 · Rodapés', null, [
+    'Modelo definido.', 'Altura informada.', 'Material especificado.',
+    'Quantitativos conferidos.', 'Encontros detalhados.', 'Compatibilidade com portas.',
+  ]],
+  ['09 · Equipamentos e Metais', 'Equipamentos', [
+    'Equipamentos especificados.', 'Medidas conferidas.', 'Marca informada.',
+    'Modelo definido.', 'Cor / acabamento informado.', 'Compatibilidade com marcenaria.',
+  ]],
+  ['09 · Equipamentos e Metais', 'Compatibilização', [
+    'Compatibilidade com marmoraria.', 'Louças especificadas.', 'Metais especificados.',
+    'Pontos hidráulicos compatíveis.', 'Manuais dos equipamentos considerados.',
+    'Folgas / acessos para manutenção conferidos.',
+  ]],
+  ['10 · Vistas Técnicas', null, [
+    'Todas as vistas presentes.', 'Cotas verificadas.', 'Alturas verificadas.',
+    'Elétrica representada.', 'Marcenaria representada.', 'Revestimentos representados.',
+    'Compatibilidade com planta.', 'Detalhes construtivos relevantes representados.',
+  ]],
+  ['11 · Controle de Documentos', null, [
+    'Planta de reforma', 'Forro / luminotécnica', 'Planta elétrica',
+    'Marcenaria / marmoraria', 'Revestimentos / pintura / rodapés',
+  ]],
+  ['12 · Compatibilização Final', 'Entre disciplinas', [
+    'Planta × Vistas', 'Planta × Marcenaria', 'Planta × Marmoraria',
+    'Planta × Elétrica', 'Planta × Gesso', 'Planta × Revestimentos',
+  ]],
+  ['12 · Compatibilização Final', 'Conferência geral', [
+    'Equipamentos cabem nos nichos.', 'Todas as cotas conferem.', 'Todas as alturas conferem.',
+    'Quantitativos conferem.', 'Legendas conferem.', 'PDF revisado.', 'Pronto para envio.',
+  ]],
+];
+
+const STATUS_REV_LABEL = { em_revisao: 'Em revisão', aprovado: 'Aprovado', corrigir: 'Corrigir pendências' };
+const STATUS_REV_COR = { em_revisao: 'var(--clay)', aprovado: 'var(--sage)', corrigir: 'var(--alert)' };
+
+async function loadChecklistRevisao(){
+  const cont = document.getElementById('checklistRevisaoConteudo');
+  cont.innerHTML = '<p class="muted">Carregando...</p>';
+
+  const { data: revisoes } = await sb.from('checklist_revisao').select('*').eq('projeto_id', projetoAtualId).order('numero', { ascending: false });
+
+  if(!revisoes || revisoes.length===0){
+    cont.innerHTML = `
+      <div class="card" style="max-width:560px;">
+        <p class="label">Checklist Executivo</p>
+        <p class="muted" style="margin-top:0;">Conferência completa antes de fechar o PDF do Projeto Executivo — planta, elétrica, marcenaria, marmoraria, revestimentos e compatibilização final. Cada item se marca como OK, AJ (precisa ajuste) ou N/A.</p>
+        <button class="btn" onclick="iniciarNovaRevisaoChecklist()">+ Iniciar 1ª revisão</button>
+      </div>`;
+    return;
+  }
+
+  const atual = revisoes[0];
+  const historico = revisoes.slice(1);
+
+  const [{ data: itens }, { data: obs }] = await Promise.all([
+    sb.from('checklist_revisao_itens').select('*').eq('checklist_id', atual.id).order('ordem'),
+    sb.from('checklist_revisao_obs').select('*').eq('checklist_id', atual.id),
+  ]);
+
+  const obsMap = new Map((obs||[]).map(o => [o.secao, o]));
+  const secoes = [...new Set(CHECKLIST_REVISAO_TEMPLATE.map(t => t[0]))];
+
+  const corpoSecoes = secoes.map(secao => {
+    const itensDaSecao = (itens||[]).filter(i => i.secao === secao);
+    const subgrupos = [...new Set(itensDaSecao.map(i => i.subgrupo || '_'))];
+    const obsSecao = obsMap.get(secao);
+    return `<div class="rev-secao">
+      <p class="rev-secao-titulo">${esc(secao)}</p>
+      ${subgrupos.map(sg => `
+        ${sg!=='_' ? `<p class="rev-subgrupo-titulo">${esc(sg)}</p>` : ''}
+        ${itensDaSecao.filter(i => (i.subgrupo||'_')===sg).map(i => `
+          <div class="rev-item">
+            <span class="rev-item-text">${esc(i.item)}</span>
+            <div class="rev-toggle">
+              <button class="rt ${i.status==='ok'?'on-ok':''}" onclick="setStatusItemRevisao('${i.id}','ok')">OK</button>
+              <button class="rt ${i.status==='aj'?'on-aj':''}" onclick="setStatusItemRevisao('${i.id}','aj')">AJ</button>
+              <button class="rt ${i.status==='na'?'on-na':''}" onclick="setStatusItemRevisao('${i.id}','na')">N/A</button>
+            </div>
+          </div>`).join('')}
+      `).join('')}
+      <textarea class="rev-obs" rows="2" placeholder="Observações / pendências dessa seção" onblur="salvarObsRevisao('${atual.id}','${secao.replace(/'/g,"\\'")}',this.value)">${esc(obsSecao?.texto || '')}</textarea>
+    </div>`;
+  }).join('');
+
+  cont.innerHTML = `
+    <div class="rev-header-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+        <div>
+          <p class="label" style="margin:0;">Revisão nº ${atual.numero}</p>
+          <p class="muted" style="margin:2px 0 0;">Checklist de revisão do Projeto Executivo</p>
+        </div>
+        <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:11px;" onclick="iniciarNovaRevisaoChecklist()">+ Nova revisão</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+        <div>
+          <label class="mono" style="font-size:10px;text-transform:uppercase;color:var(--graphite);">Revisado por</label>
+          <input value="${esc(atual.revisado_por||'')}" onblur="atualizarCabecalhoRevisao('${atual.id}',this.value,null,null)" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;" />
+        </div>
+        <div>
+          <label class="mono" style="font-size:10px;text-transform:uppercase;color:var(--graphite);">Data</label>
+          <input type="date" value="${atual.data_revisao||''}" onchange="atualizarCabecalhoRevisao('${atual.id}',null,this.value,null)" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;" />
+        </div>
+        <div>
+          <label class="mono" style="font-size:10px;text-transform:uppercase;color:var(--graphite);">Status</label>
+          <select onchange="atualizarCabecalhoRevisao('${atual.id}',null,null,this.value)" style="width:100%;border:1px solid ${STATUS_REV_COR[atual.status_geral]};color:${STATUS_REV_COR[atual.status_geral]};border-radius:8px;padding:7px 9px;font-size:12.5px;">
+            ${Object.entries(STATUS_REV_LABEL).map(([v,l]) => `<option value="${v}" ${v===atual.status_geral?'selected':''}>${l}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    ${corpoSecoes}
+
+    ${historico.length>0 ? `
+      <div class="card" style="margin-top:24px;">
+        <p class="label">Histórico de revisões anteriores</p>
+        ${historico.map(h => `
+          <div class="rev-hist-row">
+            <span>Rev. ${h.numero} — ${esc(h.revisado_por||'—')}</span>
+            <span>${h.data_revisao ? fmtDataBR(h.data_revisao) : '—'}</span>
+            <span style="color:${STATUS_REV_COR[h.status_geral]};">${STATUS_REV_LABEL[h.status_geral]}</span>
+          </div>`).join('')}
+      </div>` : ''}
+  `;
+}
+
+async function iniciarNovaRevisaoChecklist(){
+  const { data: revisoesExistentes } = await sb.from('checklist_revisao').select('numero').eq('projeto_id', projetoAtualId).order('numero', { ascending: false }).limit(1);
+  const proximoNumero = revisoesExistentes && revisoesExistentes.length>0 ? revisoesExistentes[0].numero + 1 : 1;
+
+  const { data: novaRevisao, error } = await sb.from('checklist_revisao').insert({
+    projeto_id: projetoAtualId, numero: proximoNumero,
+  }).select('id').single();
+  if(checarErro({ error }, 'iniciar revisão')) return;
+
+  let ordem = 0;
+  const todosItens = [];
+  const secoesUnicas = new Set();
+  CHECKLIST_REVISAO_TEMPLATE.forEach(([secao, subgrupo, itens]) => {
+    secoesUnicas.add(secao);
+    itens.forEach(item => {
+      todosItens.push({ checklist_id: novaRevisao.id, secao, subgrupo, item, ordem: ordem++ });
+    });
+  });
+  await sb.from('checklist_revisao_itens').insert(todosItens);
+  await sb.from('checklist_revisao_obs').insert(Array.from(secoesUnicas).map(secao => ({ checklist_id: novaRevisao.id, secao, texto: '' })));
+
+  loadChecklistRevisao();
+}
+
+async function setStatusItemRevisao(itemId, status){
+  await sb.from('checklist_revisao_itens').update({ status }).eq('id', itemId);
+  loadChecklistRevisao();
+}
+
+async function salvarObsRevisao(checklistId, secao, texto){
+  const { data: existente } = await sb.from('checklist_revisao_obs').select('id').eq('checklist_id', checklistId).eq('secao', secao).maybeSingle();
+  if(existente){
+    await sb.from('checklist_revisao_obs').update({ texto }).eq('id', existente.id);
+  } else {
+    await sb.from('checklist_revisao_obs').insert({ checklist_id: checklistId, secao, texto });
+  }
+}
+
+async function atualizarCabecalhoRevisao(checklistId, revisadoPor, dataRevisao, statusGeral){
+  const atualizacao = {};
+  if(revisadoPor!==null) atualizacao.revisado_por = revisadoPor.trim() || null;
+  if(dataRevisao!==null) atualizacao.data_revisao = dataRevisao || null;
+  if(statusGeral!==null) atualizacao.status_geral = statusGeral;
+  await sb.from('checklist_revisao').update(atualizacao).eq('id', checklistId);
+  if(statusGeral!==null) loadChecklistRevisao();
 }

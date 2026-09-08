@@ -305,6 +305,7 @@
         <button type="button" class="chip pd-tab" data-tab="anexos" onclick="trocarAbaProjeto('anexos')">Anexos</button>
         <button type="button" class="chip pd-tab" data-tab="visitas" onclick="trocarAbaProjeto('visitas')">Visitas</button>
         <button type="button" class="chip pd-tab" data-tab="relatorios" onclick="trocarAbaProjeto('relatorios')">Relatórios de obra</button>
+        <button type="button" class="chip pd-tab" data-tab="checklist" onclick="trocarAbaProjeto('checklist')">Checklist Executivo</button>
         <button type="button" class="chip pd-tab" data-tab="dados" onclick="trocarAbaProjeto('dados')">Dados da obra</button>
       </div>
 
@@ -433,6 +434,11 @@
       </div>
 
       <!-- Sub-aba: Dados da obra -->
+      <!-- Sub-aba: Checklist Executivo -->
+      <div id="pdtab-checklist" class="pd-tabcontent hidden">
+        <div id="checklistRevisaoConteudo"></div>
+      </div>
+
       <div id="pdtab-dados" class="pd-tabcontent hidden">
         <form onsubmit="salvarDadosObra(event)" class="form-box" style="max-width:560px;">
           <p class="label">Cliente e foto de capa</p>
