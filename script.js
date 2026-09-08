@@ -549,8 +549,10 @@ async function criarProjeto(e){
 /* ================= DETALHE DO PROJETO ================= */
 let projetoAtualId = null;
 let dadosProjetoAtual = null;
+let abaProjetoAtual = 'geral';
 
 function trocarAbaProjeto(tab){
+  abaProjetoAtual = tab;
   document.querySelectorAll('.pd-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'pdtab-'+tab));
   document.querySelectorAll('.pd-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
   if(tab==='anexos') loadAnexos();
@@ -558,8 +560,10 @@ function trocarAbaProjeto(tab){
 }
 
 async function loadProjetoDetalhe(projetoId){
+  const trocandoDeProjeto = projetoAtualId !== projetoId;
   projetoAtualId = projetoId;
-  trocarAbaProjeto('geral');
+  if(trocandoDeProjeto) abaProjetoAtual = 'geral';
+  trocarAbaProjeto(abaProjetoAtual);
 
   const [
     { data: projeto }, { data: etapas }, { data: tarefas }, { data: parcelas },
