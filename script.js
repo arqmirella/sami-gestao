@@ -137,7 +137,7 @@ function trocarAbaProjetosModulo(tab){
 
 async function loadDashboardProjetos(){
   const [{ data: projetos }, { data: tarefas }] = await Promise.all([
-    sb.from('projetos').select('id,status'),
+    sb.from('projetos').select('id,status').eq('is_modelo', false),
     sb.from('tarefas').select('id,titulo,status,prazo,projeto_id,projetos(nome)').order('prazo', { ascending: true }),
   ]);
 
@@ -212,7 +212,7 @@ async function loadInicio(){
 
   const [{ data: compromissos }, { data: projetos }, { data: execucao }, { data: linksRede }, { data: linksConhecimento }, { data: tarefasHoje }, { data: recados }, { data: clientesAniv }, { data: equipeAniv }] = await Promise.all([
     sb.from('compromissos').select('id, titulo, data_hora, local, projeto_id, projetos(nome)').order('data_hora', { ascending: true }),
-    sb.from('projetos').select('id,nome,cliente,cliente_id,status,capa_url,clientes(nome_completo)').eq('status','em_andamento').order('criado_em',{ascending:false}).limit(4),
+    sb.from('projetos').select('id,nome,cliente,cliente_id,status,capa_url,clientes(nome_completo)').eq('status','em_andamento').eq('is_modelo', false).order('criado_em',{ascending:false}).limit(4),
     sb.from('v_projetos_execucao').select('projeto_id,percentual_execucao,total_tarefas'),
     sb.from('links_rapidos').select('*').eq('categoria','rede_social').order('ordem'),
     sb.from('links_rapidos').select('*').eq('categoria','conhecimento').order('ordem'),
@@ -474,28 +474,47 @@ async function preencherSelectClientes(...selectIds){
   });
 }
 
+let verModelosAtivo = false;
+
 async function loadProjetos(){
   const cont = document.getElementById('projetosGrid');
   cont.innerHTML = '<p class="muted">Carregando...</p>';
   await preencherSelectClientes('npClienteId');
-  const [{ data: projetos }, { data: execucao }] = await Promise.all([
-    sb.from('projetos').select('id,nome,cliente,cliente_id,status,data_prevista,capa_url,clientes(nome_completo)').order('criado_em',{ascending:false}),
+
+  const [{ data: projetos }, { data: execucao }, { data: modelos }] = await Promise.all([
+    sb.from('projetos').select('id,nome,cliente,cliente_id,status,data_prevista,capa_url,is_modelo,clientes(nome_completo)').eq('is_modelo', verModelosAtivo).order('criado_em',{ascending:false}),
     sb.from('v_projetos_execucao').select('projeto_id,percentual_execucao,total_tarefas'),
+    sb.from('projetos').select('id,nome').eq('is_modelo', true).order('nome'),
   ]);
+
+  document.getElementById('npModelo').innerHTML = '<option value="">Começar do zero</option>' +
+    (modelos||[]).map(m => `<option value="${m.id}">${esc(m.nome)}</option>`).join('');
+
+  const btnModelos = document.getElementById('btnVerModelos');
+  btnModelos.textContent = verModelosAtivo ? '← Ver projetos normais' : `Ver projetos-modelo${modelos?.length ? ` (${modelos.length})` : ''}`;
+
   const execMap = new Map((execucao||[]).map(e => [e.projeto_id, e]));
-  if(!projetos || projetos.length===0){ cont.innerHTML = '<p class="muted">Nenhum projeto cadastrado ainda.</p>'; return; }
+  if(!projetos || projetos.length===0){
+    cont.innerHTML = `<p class="muted">${verModelosAtivo ? 'Nenhum projeto-modelo salvo ainda.' : 'Nenhum projeto cadastrado ainda.'}</p>`;
+    return;
+  }
   cont.innerHTML = projetos.map(p => {
     const ex = execMap.get(p.id) || { percentual_execucao:0, total_tarefas:0 };
     const nomeCliente = p.clientes?.nome_completo || p.cliente || '';
     return `<div class="card proj-card" onclick="navigate('projeto-detalhe',{projetoId:'${p.id}'})">
       ${p.capa_url ? `<div class="proj-thumb" style="background-image:url('${esc(p.capa_url)}');margin-bottom:10px;"></div>` : ''}
-      <p class="label">${STATUS_PROJETO_LABEL[p.status]||p.status}</p>
+      <p class="label">${p.is_modelo ? '⧉ Modelo' : (STATUS_PROJETO_LABEL[p.status]||p.status)}</p>
       <p class="proj-title">${esc(p.nome)}</p>
       ${nomeCliente ? `<p class="proj-client">${esc(nomeCliente)}</p>` : '<div style="height:14px;"></div>'}
-      <div class="bar"><div style="width:${ex.percentual_execucao}%"></div></div>
-      <p class="barcaption">${ex.percentual_execucao}% concluído${ex.total_tarefas ? ` · ${ex.total_tarefas} tarefas` : ''}</p>
+      ${p.is_modelo ? '' : `<div class="bar"><div style="width:${ex.percentual_execucao}%"></div></div>
+      <p class="barcaption">${ex.percentual_execucao}% concluído${ex.total_tarefas ? ` · ${ex.total_tarefas} tarefas` : ''}</p>`}
     </div>`;
   }).join('');
+}
+
+function alternarVisaoModelos(){
+  verModelosAtivo = !verModelosAtivo;
+  loadProjetos();
 }
 
 async function criarProjeto(e){
@@ -504,6 +523,7 @@ async function criarProjeto(e){
   const clienteId = document.getElementById('npClienteId').value;
   const dataPrevista = document.getElementById('npData').value;
   const arquivoFoto = document.getElementById('npFoto').files[0];
+  const modeloOrigemId = document.getElementById('npModelo').value;
   if(!nome) return;
 
   const capaUrl = await uploadFotoProjeto(arquivoFoto);
@@ -516,6 +536,11 @@ async function criarProjeto(e){
   }).select('id').single();
   if(checarErro(resultado, 'criar projeto')) return;
   const { data } = resultado;
+
+  if(data && modeloOrigemId){
+    await duplicarEstruturaProjeto(modeloOrigemId, data.id);
+  }
+
   e.target.reset();
   toggleForm('formNovoProjeto', false);
   if(data) navigate('projeto-detalhe', { projetoId: data.id });
@@ -538,7 +563,7 @@ async function loadProjetoDetalhe(projetoId){
   const [
     { data: projeto }, { data: etapas }, { data: tarefas }, { data: parcelas },
     { data: responsaveis }, { data: equipe }, { data: visitas }, { data: relatorios }, { data: execEtapas },
-    { data: ambientes }
+    { data: ambientes }, { data: rentabilidade }
   ] = await Promise.all([
     sb.from('projetos').select('*, clientes(nome_completo)').eq('id', projetoId).single(),
     sb.from('etapas').select('*').eq('projeto_id', projetoId).order('ordem'),
@@ -550,6 +575,7 @@ async function loadProjetoDetalhe(projetoId){
     sb.from('relatorios_obra').select('*').eq('projeto_id', projetoId).order('criado_em',{ascending:false}),
     sb.from('v_etapas_execucao').select('etapa_id,percentual_execucao,total_tarefas'),
     sb.from('ambientes').select('*').eq('projeto_id', projetoId).order('ordem'),
+    sb.from('v_rentabilidade_projeto').select('*').eq('projeto_id', projetoId).maybeSingle(),
   ]);
   if(!projeto) { navigate('projetos'); return; }
   dadosProjetoAtual = projeto;
@@ -699,6 +725,23 @@ async function loadProjetoDetalhe(projetoId){
         </div>
       </div>`).join('');
 
+  /* ---- Rentabilidade ---- */
+  if(rentabilidade){
+    const lucro = Number(rentabilidade.recebido) - Number(rentabilidade.despesas) - Number(rentabilidade.custo_horas);
+    document.getElementById('cardRentabilidade').innerHTML = `
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="color:var(--graphite);">Recebido</span><span>${fmtMoeda(rentabilidade.recebido)}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="color:var(--graphite);">Despesas do projeto</span><span>− ${fmtMoeda(rentabilidade.despesas)}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:10px;"><span style="color:var(--graphite);">Custo de horas</span><span>− ${fmtMoeda(rentabilidade.custo_horas)}</span></div>
+      <div style="display:flex;justify-content:space-between;border-top:1px solid var(--line);padding-top:8px;">
+        <span style="font-weight:600;">Lucro estimado</span>
+        <span style="font-weight:600;color:${lucro>=0?CORES.pago:CORES.atrasado};">${fmtMoeda(lucro)}</span>
+      </div>
+      <p class="muted" style="font-size:11px;margin:10px 0 0;">Só conta parcelas e despesas já marcadas como pagas, e horas registradas no cronômetro. Cadastre o "custo por hora" de cada pessoa em Equipe pra esse número ficar mais preciso.</p>
+    `;
+  } else {
+    document.getElementById('cardRentabilidade').innerHTML = '<p class="muted">Sem dados suficientes ainda.</p>';
+  }
+
   /* ---- Visitas ---- */
   document.getElementById('listaVisitas').innerHTML = (visitas||[]).length===0
     ? '<p class="muted">Nenhuma visita registrada ainda.</p>'
@@ -745,6 +788,7 @@ async function loadProjetoDetalhe(projetoId){
   document.getElementById('doDataInicio').value = projeto.data_inicio_obra || '';
   document.getElementById('doArquiteta').value = projeto.arquiteta_responsavel || '';
   document.getElementById('doEmpresa').value = projeto.empresa_engenharia || '';
+  document.getElementById('doModelo').checked = !!projeto.is_modelo;
 
   document.getElementById('anEtapa').innerHTML = '<option value="">Sem etapa vinculada</option>' +
     (etapas||[]).map(et => `<option value="${et.id}">${esc(et.nome)}</option>`).join('');
@@ -1044,6 +1088,7 @@ async function salvarDadosObra(e){
     data_inicio_obra: document.getElementById('doDataInicio').value || null,
     arquiteta_responsavel: document.getElementById('doArquiteta').value.trim() || null,
     empresa_engenharia: document.getElementById('doEmpresa').value.trim() || null,
+    is_modelo: document.getElementById('doModelo').checked,
   };
   if(arquivoFoto){
     const capaUrl = await uploadFotoProjeto(arquivoFoto);
@@ -1635,6 +1680,7 @@ async function criarMembro(e){
     nome,
     funcao: document.getElementById('eqFuncao').value.trim() || null,
     data_nascimento: document.getElementById('eqNascimento').value || null,
+    custo_hora: document.getElementById('eqCustoHora').value.trim().replace(',', '.') || null,
   });
   if(checarErro(resultado, 'cadastrar pessoa')) return;
   e.target.reset();
@@ -2296,10 +2342,14 @@ function recarregarAposEdicao(){
 
 /* ---- Editar tarefa ---- */
 async function abrirModalEditarTarefa(tarefaId){
-  const { data: tarefa } = await sb.from('tarefas').select('*').eq('id', tarefaId).single();
+  const [{ data: tarefa }, { data: comentarios }] = await Promise.all([
+    sb.from('tarefas').select('*').eq('id', tarefaId).single(),
+    sb.from('tarefa_comentarios').select('*').eq('tarefa_id', tarefaId).order('criado_em', { ascending: true }),
+  ]);
   if(!tarefa) return;
 
   const { data: ambientesProjeto } = await sb.from('ambientes').select('id,nome').eq('projeto_id', tarefa.projeto_id);
+  const nomeSalvoComentario = localStorage.getItem('sami_nome_recado') || '';
 
   abrirModal(`
     <p class="label" style="margin-bottom:14px;">Editar tarefa</p>
@@ -2320,7 +2370,38 @@ async function abrirModalEditarTarefa(tarefaId){
         <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
       </div>
     </form>
+
+    <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;">
+      <p class="label" style="margin-bottom:10px;">Comentários</p>
+      <div id="listaComentariosTarefa" style="margin-bottom:10px;max-height:200px;overflow-y:auto;">
+        ${(comentarios||[]).length===0
+          ? '<p class="muted" style="font-size:12.5px;">Nenhum comentário ainda.</p>'
+          : comentarios.map(c => `
+            <div style="margin-bottom:10px;">
+              <p style="font-size:12px;margin:0;"><b>${esc(c.autor_nome)}</b> <span style="color:var(--graphite);font-size:11px;">${new Date(c.criado_em).toLocaleDateString('pt-BR')} ${new Date(c.criado_em).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span></p>
+              <p style="font-size:13px;margin:2px 0 0;">${esc(c.texto)}</p>
+            </div>`).join('')}
+      </div>
+      <form onsubmit="adicionarComentarioTarefa(event,'${tarefaId}')">
+        <input id="comAutor" required value="${esc(nomeSalvoComentario)}" placeholder="Seu nome" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:7px 9px;margin-bottom:6px;font-size:12.5px;" />
+        <div style="display:flex;gap:6px;">
+          <input id="comTexto" required placeholder="Escrever um comentário..." style="flex:1;border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:12.5px;" />
+          <button class="btn" style="padding:7px 12px;font-size:10.5px;">Enviar</button>
+        </div>
+      </form>
+    </div>
   `);
+}
+
+async function adicionarComentarioTarefa(e, tarefaId){
+  e.preventDefault();
+  const autor = document.getElementById('comAutor').value.trim();
+  const texto = document.getElementById('comTexto').value.trim();
+  if(!autor || !texto) return;
+  localStorage.setItem('sami_nome_recado', autor);
+  const resultado = await sb.from('tarefa_comentarios').insert({ tarefa_id: tarefaId, autor_nome: autor, texto });
+  if(checarErro(resultado, 'comentar')) return;
+  abrirModalEditarTarefa(tarefaId);
 }
 
 async function salvarEdicaoTarefa(e, tarefaId){
@@ -2391,4 +2472,56 @@ async function salvarEdicaoEtapa(e, etapaId){
   if(checarErro(resultado, 'editar etapa')) return;
   fecharModalEditar();
   loadProjetoDetalhe(projetoAtualId);
+}
+
+/* ================= DUPLICAR PROJETO (modelo/template) ================= */
+async function duplicarEstruturaProjeto(origemId, destinoId){
+  const [{ data: ambientesOrigem }, { data: etapasOrigem }] = await Promise.all([
+    sb.from('ambientes').select('*').eq('projeto_id', origemId),
+    sb.from('etapas').select('*').eq('projeto_id', origemId),
+  ]);
+
+  // Ambientes: recria e guarda o mapa id-antigo -> id-novo
+  const mapaAmbientes = new Map();
+  for(const amb of (ambientesOrigem||[])){
+    const { data: novoAmb } = await sb.from('ambientes').insert({
+      projeto_id: destinoId, nome: amb.nome, ordem: amb.ordem,
+    }).select('id').single();
+    if(novoAmb) mapaAmbientes.set(amb.id, novoAmb.id);
+  }
+
+  // Etapas: recria zeradas (sem datas/status/termo), guarda o mapa pra depois religar as dependências
+  const mapaEtapas = new Map();
+  for(const et of (etapasOrigem||[])){
+    const { data: novaEt } = await sb.from('etapas').insert({
+      projeto_id: destinoId,
+      nome: et.nome,
+      ordem: et.ordem,
+      prioridade: et.prioridade,
+      resumo: et.resumo,
+      tarefas_modelo: et.tarefas_modelo,
+      responsavel_id: et.responsavel_id,
+    }).select('id').single();
+    if(novaEt) mapaEtapas.set(et.id, novaEt.id);
+  }
+  // Segunda passada: religa "depende de" usando os novos ids
+  for(const et of (etapasOrigem||[])){
+    if(et.bloqueado_por && mapaEtapas.has(et.id) && mapaEtapas.has(et.bloqueado_por)){
+      await sb.from('etapas').update({ bloqueado_por: mapaEtapas.get(et.bloqueado_por) }).eq('id', mapaEtapas.get(et.id));
+    }
+  }
+}
+
+async function duplicarProjetoAtual(){
+  const nomeAtual = dadosProjetoAtual?.nome || '';
+  const novoNome = prompt('Nome do novo projeto:', `${nomeAtual} (cópia)`);
+  if(!novoNome || !novoNome.trim()) return;
+
+  const { data: novoProjeto, error: erroProjeto } = await sb.from('projetos')
+    .insert({ nome: novoNome.trim() })
+    .select('id').single();
+  if(checarErro({ error: erroProjeto }, 'duplicar projeto')) return;
+
+  await duplicarEstruturaProjeto(projetoAtualId, novoProjeto.id);
+  navigate('projeto-detalhe', { projetoId: novoProjeto.id });
 }
