@@ -671,23 +671,26 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
         })
         .map(amb => {
         const itens = tarefasDaEtapa.filter(t => (t.ambiente_id||null) === amb.id);
-        return `<div class="checklist-ambiente">
-          <div class="checklist-ambiente-titulo">
+        const concluidos = itens.filter(i=>i.status==='concluida').length;
+        return `<details class="checklist-ambiente">
+          <summary class="checklist-ambiente-titulo">
             <span>${esc(amb.nome)}</span>
-            <span class="mono" style="font-size:11px;color:var(--graphite);">${itens.filter(i=>i.status==='concluida').length}/${itens.length}</span>
+            <span class="checklist-ambiente-count ${concluidos===itens.length && itens.length>0 ? 'completo' : ''}">${concluidos}/${itens.length}</span>
+          </summary>
+          <div class="checklist-ambiente-corpo">
+            ${itens.map(i => `
+              <div class="checklist-item">
+                <input type="checkbox" ${i.status==='concluida'?'checked':''} onchange="toggleChecklistItem('${i.id}', this.checked)" />
+                <span class="${i.status==='concluida'?'done':''}">${esc(i.titulo)}</span>
+                <button class="edit-link" onclick="abrirModalEditarTarefa('${i.id}')">editar</button>
+                <button class="remove-link" onclick="excluirTarefaProjeto('${i.id}')">×</button>
+              </div>`).join('')}
+            <form class="checklist-add" onsubmit="adicionarItemChecklist(event,'${et.id}',${amb.id?`'${amb.id}'`:'null'})">
+              <input placeholder="+ item" />
+              <button class="btn-ghost" style="border:1px solid var(--line);border-radius:8px;">Add</button>
+            </form>
           </div>
-          ${itens.map(i => `
-            <div class="checklist-item">
-              <input type="checkbox" ${i.status==='concluida'?'checked':''} onchange="toggleChecklistItem('${i.id}', this.checked)" />
-              <span class="${i.status==='concluida'?'done':''}">${esc(i.titulo)}</span>
-              <button class="edit-link" onclick="abrirModalEditarTarefa('${i.id}')">editar</button>
-              <button class="remove-link" onclick="excluirTarefaProjeto('${i.id}')">×</button>
-            </div>`).join('')}
-          <form class="checklist-add" onsubmit="adicionarItemChecklist(event,'${et.id}',${amb.id?`'${amb.id}'`:'null'})">
-            <input placeholder="+ item" />
-            <button class="btn-ghost" style="border:1px solid var(--line);border-radius:8px;">Add</button>
-          </form>
-        </div>`;
+        </details>`;
       }).join('');
 
       return `<div class="task-card">
@@ -713,7 +716,7 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
 
         <div style="border-top:1px solid var(--line);padding-top:10px;margin-top:4px;">
           <p class="mono" style="font-size:11.5px;text-transform:uppercase;color:var(--graphite);margin:0 0 8px;">Checklist</p>
-          ${gruposChecklist}
+          <div class="checklist-grid">${gruposChecklist}</div>
         </div>
 
         <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:8px;margin-top:10px;">

@@ -261,16 +261,22 @@
   }
 
   /* Checklist por ambiente dentro da etapa */
-  .checklist-ambiente{margin-bottom:14px;}
-  .checklist-ambiente:last-child{margin-bottom:0;}
-  .checklist-ambiente-titulo{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
-  .checklist-ambiente-titulo span{font-family:'IBM Plex Mono',monospace;font-size:11.5px;text-transform:uppercase;color:var(--graphite);}
+  .checklist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;align-items:start;}
+  .checklist-ambiente{background:var(--paper);border:1px solid var(--line);border-radius:11px;padding:0;overflow:hidden;}
+  .checklist-ambiente-titulo{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;list-style:none;}
+  .checklist-ambiente-titulo::-webkit-details-marker{display:none;}
+  .checklist-ambiente-titulo::marker{display:none;content:'';}
+  .checklist-ambiente-titulo span:first-child{font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;color:var(--ink);}
+  .checklist-ambiente-count{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--graphite);background:#fff;border:1px solid var(--line);border-radius:99px;padding:2px 8px;}
+  .checklist-ambiente-count.completo{color:var(--sage);border-color:var(--sage);}
+  .checklist-ambiente[open] .checklist-ambiente-titulo{border-bottom:1px solid var(--line);}
+  .checklist-ambiente-corpo{background:#fff;padding:10px 12px;}
   .checklist-item{display:flex;align-items:center;gap:8px;padding:4px 0;}
   .checklist-item input[type=checkbox]{width:16px;height:16px;accent-color:var(--terracotta);flex-shrink:0;cursor:pointer;}
   .checklist-item span{font-size:13px;flex:1;}
   .checklist-item span.done{text-decoration:line-through;color:var(--graphite);}
   .checklist-item .remove-link{font-size:11.5px;}
-  .checklist-add{display:flex;gap:6px;margin-top:4px;}
+  .checklist-add{display:flex;gap:6px;margin-top:6px;}
   .checklist-add input{flex:1;border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12.5px;}
   .checklist-add button{font-size:12px;padding:5px 10px;}
 
