@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -19,15 +18,15 @@
 <!-- LOGIN -->
 <div id="loginScreen">
   <div class="login-box">
-    <p class="mono" style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--graphite);margin-bottom:8px;">SAMI · Arquitetura</p>
+    <p class="mono" style="font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--graphite);margin-bottom:8px;">SAMI · Arquitetura</p>
     <h1 style="margin-bottom:28px;">Acesso da equipe</h1>
     <form id="formLogin">
       <div class="field">
-        <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">E-mail</label>
+        <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">E-mail</label>
         <input id="loginEmail" type="email" required placeholder="equipe@sami.arq" />
       </div>
       <div class="field">
-        <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Senha</label>
+        <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Senha</label>
         <input id="loginSenha" type="password" required placeholder="••••••••" />
       </div>
       <p id="loginErro" class="erro"></p>
@@ -60,7 +59,7 @@
         <button class="navbtn" data-view="equipe" onclick="navigate('equipe')">Equipe</button>
       </nav>
     </div>
-    <button class="btn-ghost mono" style="text-transform:uppercase;font-size:11px;" onclick="handleLogout()">Sair</button>
+    <button class="btn-ghost mono" style="text-transform:uppercase;font-size:12px;" onclick="handleLogout()">Sair</button>
   </aside>
 
   <main>
@@ -76,7 +75,7 @@
       <div class="grid inicio-top-grid" style="grid-template-columns:0.85fr 1fr auto;align-items:stretch;margin-bottom:24px;">
         <div class="hero hero-compact">
           <div>
-            <p class="mono" id="heroDia" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;opacity:.85;"></p>
+            <p class="mono" id="heroDia" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;opacity:.85;"></p>
             <p class="time" id="heroHora"></p>
             <p id="heroData" style="font-size:13px;opacity:.9;margin:0;"></p>
           </div>
@@ -131,7 +130,7 @@
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
         <p class="label mono" style="margin:0;">Tarefas de hoje</p>
-        <button class="btn-ghost mono" style="font-size:11px;text-transform:uppercase;padding:0;" onclick="navigate('projetos',{subaba:'tarefas'})">ver todas ›</button>
+        <button class="btn-ghost mono" style="font-size:12px;text-transform:uppercase;padding:0;" onclick="navigate('projetos',{subaba:'tarefas'})">ver todas ›</button>
       </div>
       <div class="card" id="tarefasHoje" style="padding:0;margin-bottom:32px;"></div>
 
@@ -144,7 +143,7 @@
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
         <p class="label mono" style="margin:0;">Projetos em andamento</p>
-        <button class="btn-ghost mono" style="font-size:11px;text-transform:uppercase;padding:0;" onclick="navigate('projetos')">ver todos ›</button>
+        <button class="btn-ghost mono" style="font-size:12px;text-transform:uppercase;padding:0;" onclick="navigate('projetos')">ver todos ›</button>
       </div>
       <div class="grid projetos-grid" id="resumoProjetos" style="margin-bottom:32px;"></div>
 
@@ -152,7 +151,7 @@
         <div class="card">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
             <p class="label" style="margin:0;">Redes sociais</p>
-            <button class="btn-ghost" style="font-size:11px;padding:0;" onclick="toggleForm('formLinkRede')">+ adicionar</button>
+            <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="toggleForm('formLinkRede')">+ adicionar</button>
           </div>
           <form id="formLinkRede" class="hidden" style="margin-bottom:12px;" onsubmit="criarLinkRapido(event,'rede_social')">
             <input id="lrNomeRede" required placeholder="Nome (ex: Instagram)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:6px;" />
@@ -165,7 +164,7 @@
         <div class="card">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
             <p class="label" style="margin:0;">Conhecimento compartilhado</p>
-            <button class="btn-ghost" style="font-size:11px;padding:0;" onclick="toggleForm('formLinkConhecimento')">+ adicionar</button>
+            <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="toggleForm('formLinkConhecimento')">+ adicionar</button>
           </div>
           <form id="formLinkConhecimento" class="hidden" style="margin-bottom:12px;" onsubmit="criarLinkRapido(event,'conhecimento')">
             <input id="lrNomeConhecimento" required placeholder="Nome (ex: Guia de Materiais)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:6px;" />
@@ -190,8 +189,9 @@
 
       <!-- Sub-aba: Dashboard -->
       <div id="pjtab-dashboard" class="pj-tabcontent">
+        <div id="alertaRespostasCliente" class="alertbox hidden"></div>
         <div class="grid cards4" id="dashProjetosStats" style="margin-bottom:28px;"></div>
-        <div class="grid" style="grid-template-columns:1fr 1fr;gap:20px;">
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:20px;">
           <div class="card">
             <p class="label" style="margin-bottom:10px;">Próximas entregas</p>
             <div id="dashProximasEntregas"></div>
@@ -200,6 +200,10 @@
             <p class="label" style="color:var(--alert);margin-bottom:10px;">Tarefas atrasadas</p>
             <div id="dashTarefasAtrasadas"></div>
           </div>
+          <div class="card">
+            <p class="label" style="color:var(--terracotta);margin-bottom:10px;">Respostas de clientes</p>
+            <div id="dashRespostasCliente"></div>
+          </div>
         </div>
       </div>
 
@@ -207,16 +211,16 @@
       <div id="pjtab-lista" class="pj-tabcontent hidden">
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
           <button class="btn" onclick="toggleForm('formNovoProjeto')">+ Novo projeto</button>
-          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:11px;" id="btnVerModelos" onclick="alternarVisaoModelos()">Ver projetos-modelo</button>
+          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" id="btnVerModelos" onclick="alternarVisaoModelos()">Ver projetos-modelo</button>
         </div>
         <form id="formNovoProjeto" class="form-box hidden" onsubmit="criarProjeto(event)">
           <input id="npNome" required placeholder="Nome do projeto" />
           <select id="npClienteId"><option value="">Sem cliente vinculado</option></select>
-          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Previsão de entrega</label>
+          <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Previsão de entrega</label>
           <input id="npData" type="date" />
-          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Foto de capa (opcional)</label>
+          <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Foto de capa (opcional)</label>
           <input id="npFoto" type="file" accept="image/*" style="margin-bottom:10px;" />
-          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Começar a partir de um modelo (opcional)</label>
+          <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Começar a partir de um modelo (opcional)</label>
           <select id="npModelo"><option value="">Começar do zero</option></select>
           <div class="form-actions">
             <button type="submit" class="btn">Criar projeto</button>
@@ -286,7 +290,7 @@
 
     <!-- DETALHE DO PROJETO -->
     <section id="view-projeto-detalhe" class="hidden">
-      <button class="btn-ghost mono" style="font-size:11px;text-transform:uppercase;padding:0;margin-bottom:14px;" onclick="navigate('projetos')">‹ Voltar pra Projetos</button>
+      <button class="btn-ghost mono" style="font-size:12px;text-transform:uppercase;padding:0;margin-bottom:14px;" onclick="navigate('projetos')">‹ Voltar pra Projetos</button>
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;">
         <div>
           <p class="label" id="pdCliente"></p>
@@ -294,7 +298,7 @@
         </div>
         <div style="display:flex;align-items:center;gap:12px;">
           <select id="pdStatus" class="mono" style="border:1px solid var(--line);border-radius:8px;padding:7px;font-size:13px;" onchange="atualizarStatusProjeto(this.value)"></select>
-          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:8px;font-size:11px;" onclick="duplicarProjetoAtual()">⧉ Duplicar projeto</button>
+          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:8px;font-size:12px;" onclick="duplicarProjetoAtual()">⧉ Duplicar projeto</button>
           <button class="remove-link mono" style="text-transform:uppercase;" onclick="excluirProjetoAtual()">Excluir projeto</button>
         </div>
       </div>
@@ -306,6 +310,7 @@
         <button type="button" class="chip pd-tab" data-tab="visitas" onclick="trocarAbaProjeto('visitas')">Visitas</button>
         <button type="button" class="chip pd-tab" data-tab="relatorios" onclick="trocarAbaProjeto('relatorios')">Relatórios de obra</button>
         <button type="button" class="chip pd-tab" data-tab="checklist" onclick="trocarAbaProjeto('checklist')">Checklist Executivo</button>
+        <button type="button" class="chip pd-tab" data-tab="aprovacoes" onclick="trocarAbaProjeto('aprovacoes')">Aprovações do cliente</button>
         <button type="button" class="chip pd-tab" data-tab="dados" onclick="trocarAbaProjeto('dados')">Dados da obra</button>
       </div>
 
@@ -327,7 +332,7 @@
           <div>
             <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
               <p class="col-label" style="margin:0;">Financeiro</p>
-              <p class="mono" id="pdTotalFinanceiro" style="font-size:11px;color:var(--graphite);"></p>
+              <p class="mono" id="pdTotalFinanceiro" style="font-size:12px;color:var(--graphite);"></p>
             </div>
             <form onsubmit="adicionarParcelaProjeto(event)" style="margin-bottom:12px;">
               <input id="fpDescricao" placeholder="Descrição" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:6px;" />
@@ -375,7 +380,7 @@
           <select id="etBloqueadaPor" style="width:100%;"><option value="">Não depende de outra etapa</option></select>
           <textarea id="etResumo" placeholder="Resumo (opcional)" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
           <details style="margin-bottom:10px;">
-            <summary class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);cursor:pointer;">Tarefas automáticas por dependência (avançado)</summary>
+            <summary class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);cursor:pointer;">Tarefas automáticas por dependência (avançado)</summary>
             <p class="muted" style="font-size:12px;margin:6px 0;">Só funciona se essa etapa depender de outra (acima). Uma tarefa por linha — são criadas sozinhas quando a etapa da qual essa depende for concluída. Pro dia a dia, use o checklist por ambiente que aparece depois de criar a etapa.</p>
             <textarea id="etTarefasModelo" placeholder="Ex:&#10;Levantamento fotográfico&#10;Medição in loco&#10;Reunião de briefing" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:0;"></textarea>
           </details>
@@ -437,6 +442,31 @@
       <!-- Sub-aba: Checklist Executivo -->
       <div id="pdtab-checklist" class="pd-tabcontent hidden">
         <div id="checklistRevisaoConteudo"></div>
+      </div>
+
+      <!-- Sub-aba: Aprovações do cliente -->
+      <div id="pdtab-aprovacoes" class="pd-tabcontent hidden">
+        <p class="muted" style="max-width:600px;">Peça o aceite do cliente pra briefing, estudo preliminar, executivo ou imagens 3D — ele responde direto pelo link dele (a mesma tela de acompanhamento), aprovando ou pedindo ajuste com um comentário. Precisa gerar o link do portal primeiro, na aba "Dados da obra".</p>
+        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaAprovacao')">+ Pedir aprovação</button>
+        <form id="formNovaAprovacao" class="form-box hidden" onsubmit="criarAprovacao(event)">
+          <select id="apTipo" onchange="ajustarTituloAprovacao()">
+            <option value="briefing">Briefing</option>
+            <option value="estudo_preliminar">Estudo Preliminar</option>
+            <option value="executivo">Projeto Executivo</option>
+            <option value="imagens_3d">Imagens 3D</option>
+            <option value="outro">Outro</option>
+          </select>
+          <input id="apTitulo" required placeholder="Título (ex: Aprovação do Estudo Preliminar)" />
+          <select id="apEtapa"><option value="">Sem etapa vinculada</option></select>
+          <textarea id="apDescricao" placeholder="Descrição / o que o cliente deve avaliar (opcional)" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
+          <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Imagens (opcional — útil pra 3D)</label>
+          <input id="apImagens" type="file" accept="image/*" multiple style="margin-bottom:10px;" />
+          <div class="form-actions">
+            <button type="submit" class="btn">Enviar pro cliente</button>
+            <button type="button" class="btn-ghost" onclick="toggleForm('formNovaAprovacao', false)">Cancelar</button>
+          </div>
+        </form>
+        <div id="listaAprovacoes"></div>
       </div>
 
       <div id="pdtab-dados" class="pd-tabcontent hidden">
@@ -528,7 +558,7 @@
 
     <!-- DETALHE DO CLIENTE -->
     <section id="view-cliente-detalhe" class="hidden">
-      <button class="btn-ghost mono" style="font-size:11px;text-transform:uppercase;padding:0;margin-bottom:14px;" onclick="navigate('clientes')">‹ Voltar pra Clientes</button>
+      <button class="btn-ghost mono" style="font-size:12px;text-transform:uppercase;padding:0;margin-bottom:14px;" onclick="navigate('clientes')">‹ Voltar pra Clientes</button>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
         <h1 id="cdNome" style="margin:0;"></h1>
         <button class="remove-link mono" style="text-transform:uppercase;" onclick="excluirClienteAtual()">Excluir cliente</button>
@@ -543,7 +573,7 @@
       <div class="card" style="margin-bottom:20px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
           <p class="label" style="margin:0;">Redes cadastradas</p>
-          <button class="btn-ghost" style="font-size:11px;padding:0;" onclick="toggleForm('formRedeSocial')">+ nova rede</button>
+          <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="toggleForm('formRedeSocial')">+ nova rede</button>
         </div>
         <form id="formRedeSocial" class="hidden" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;" onsubmit="criarRedeSocial(event)">
           <input id="rsNome" required placeholder="Nome (ex: Instagram)" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
@@ -592,13 +622,13 @@
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
           <p class="label" style="margin:0;">Painel de ideias / referências</p>
-          <button class="btn-ghost" style="font-size:11px;padding:0;" onclick="toggleForm('formNovaIdeia')">+ adicionar</button>
+          <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="toggleForm('formNovaIdeia')">+ adicionar</button>
         </div>
         <form id="formNovaIdeia" class="form-box hidden" style="max-width:420px;" onsubmit="criarIdeia(event)">
           <input id="idTitulo" placeholder="Título / nome da referência (opcional)" />
           <select id="idRede"><option value="">Sem rede vinculada</option></select>
           <textarea id="idNota" placeholder="Nota (opcional)" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
-          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Imagem (print, referência)</label>
+          <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Imagem (print, referência)</label>
           <input id="idImagem" type="file" accept="image/*" required style="margin-bottom:10px;" />
           <div class="form-actions">
             <button type="submit" class="btn">Salvar</button>
@@ -738,10 +768,10 @@
           <form id="formEquipe" class="form-box hidden" onsubmit="criarMembro(event)">
             <input id="eqNome" required placeholder="Nome" />
             <input id="eqFuncao" placeholder="Função (ex: Arquiteta, Estagiário)" />
-            <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Data de nascimento (opcional)</label>
+            <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Data de nascimento (opcional)</label>
             <input id="eqNascimento" type="date" style="margin-bottom:10px;" />
-            <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Custo por hora (opcional, R$)</label>
-            <p class="muted" style="font-size:11.5px;margin:2px 0 6px;">Usado só pra calcular a rentabilidade dos projetos — não aparece em lugar nenhum pra pessoa.</p>
+            <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Custo por hora (opcional, R$)</label>
+            <p class="muted" style="font-size:12.5px;margin:2px 0 6px;">Usado só pra calcular a rentabilidade dos projetos — não aparece em lugar nenhum pra pessoa.</p>
             <input id="eqCustoHora" placeholder="Ex: 45,00" style="margin-bottom:10px;" />
             <div class="form-actions">
               <button type="submit" class="btn">Salvar</button>

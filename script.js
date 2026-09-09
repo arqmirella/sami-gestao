@@ -23,6 +23,23 @@ let sb;
 let mesRef = new Date();
 let charts = {};
 
+/* Carrega o Chart.js só na primeira vez que alguma tela com gráfico é aberta
+   (Financeiro ou Equipe) — nas outras telas o sistema abre mais rápido
+   por não precisar baixar essa biblioteca à toa. */
+let _chartJsPromise = null;
+function ensureChartJs(){
+  if(window.Chart) return Promise.resolve();
+  if(_chartJsPromise) return _chartJsPromise;
+  _chartJsPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js';
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  return _chartJsPromise;
+}
+
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtMoeda(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
 
@@ -99,7 +116,7 @@ function navigate(view, opts){
   if(view==='fornecedores') loadFornecedores();
   if(view==='orcamentos') loadOrcamentos();
   if(view==='equipe') loadEquipe();
-  if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId);
+  if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId, opts.aba);
   if(view==='cliente-detalhe' && opts.clienteId) loadClienteDetalhe(opts.clienteId);
   fecharMenuMobile();
   window.scrollTo(0, 0);
@@ -136,9 +153,10 @@ function trocarAbaProjetosModulo(tab){
 }
 
 async function loadDashboardProjetos(){
-  const [{ data: projetos }, { data: tarefas }] = await Promise.all([
+  const [{ data: projetos }, { data: tarefas }, { data: respostasCliente }] = await Promise.all([
     sb.from('projetos').select('id,status').eq('is_modelo', false),
     sb.from('tarefas').select('id,titulo,status,prazo,projeto_id,projetos(nome)').order('prazo', { ascending: true }),
+    sb.from('aprovacoes_cliente').select('id,titulo,status,data_resposta,projeto_id,projetos(nome)').neq('status','pendente').eq('visto_pela_equipe', false).order('data_resposta',{ascending:false}),
   ]);
 
   const totalProjetos = (projetos||[]).length;
@@ -149,6 +167,17 @@ async function loadDashboardProjetos(){
   const vencendoEmBreve = (tarefas||[]).filter(t => t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') >= hoje && new Date(t.prazo+'T00:00:00') <= limiteAlerta);
   const concluidas = (tarefas||[]).filter(t => t.status==='concluida');
   const pendentes = (tarefas||[]).filter(t => t.status==='pendente');
+
+  const alertaEl = document.getElementById('alertaRespostasCliente');
+  if((respostasCliente||[]).length > 0){
+    alertaEl.classList.remove('hidden');
+    alertaEl.innerHTML = `<p class="label mono" style="color:var(--terracotta);">${respostasCliente.length===1?'1 cliente respondeu uma aprovação':respostasCliente.length+' clientes responderam aprovações'} — ainda não vistas</p>
+      <ul style="margin:6px 0 0;padding-left:18px;">
+        ${respostasCliente.map(r => `<li><a href="#" onclick="navigate('projeto-detalhe',{projetoId:'${r.projeto_id}',aba:'aprovacoes'});return false;" style="color:var(--ink);">${esc(r.titulo)}</a> — ${esc(r.projetos?.nome||'')} · ${r.status==='aprovado'?'aprovado':'pediu ajuste'}</li>`).join('')}
+      </ul>`;
+  } else {
+    alertaEl.classList.add('hidden');
+  }
 
   document.getElementById('dashProjetosStats').innerHTML = `
     <div class="card"><p class="label">Projetos</p><p style="font-size:22px;font-weight:600;font-family:'Space Grotesk',sans-serif;">${totalProjetos}</p></div>
@@ -169,11 +198,19 @@ async function loadDashboardProjetos(){
     }).join('');
 
   document.getElementById('dashTarefasAtrasadas').innerHTML = atrasadas.length===0
-    ? '<p class="muted" style="font-size:13px;">Nenhuma tarefa atrasada. 🎉</p>'
+    ? '<p class="muted" style="font-size:13px;">Nenhuma tarefa atrasada.</p>'
     : atrasadas.slice(0,7).map(t => `
       <div class="quicklink-item" style="cursor:pointer;" onclick="navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})">
         <span>${esc(t.titulo)} <span class="sub" style="color:var(--graphite);">· ${esc(t.projetos?.nome||'')}</span></span>
         <span class="badge alert">${fmtDataBR(t.prazo)}</span>
+      </div>`).join('');
+
+  document.getElementById('dashRespostasCliente').innerHTML = (respostasCliente||[]).length===0
+    ? '<p class="muted" style="font-size:13px;">Nenhuma resposta nova.</p>'
+    : respostasCliente.map(r => `
+      <div class="quicklink-item" style="cursor:pointer;" onclick="navigate('projeto-detalhe',{projetoId:'${r.projeto_id}',aba:'aprovacoes'})">
+        <span>${esc(r.titulo)} <span class="sub" style="color:var(--graphite);">· ${esc(r.projetos?.nome||'')}</span></span>
+        <span class="badge ${r.status==='aprovado'?'line':'alert'}">${r.status==='aprovado'?'Aprovado':'Pediu ajuste'}</span>
       </div>`).join('');
 }
 
@@ -223,13 +260,13 @@ async function loadInicio(){
   ]);
 
   window._compromissos = compromissos || [];
+  renderAniversarios(clientesAniv||[], equipeAniv||[]);
   renderCalendario();
   renderCompromissos();
   renderResumoProjetos(projetos||[], execucao||[]);
   renderLinksRapidos(linksRede||[], linksConhecimento||[]);
   renderTarefasHoje(tarefasHoje||[]);
   renderRecados(recados||[]);
-  renderAniversarios(clientesAniv||[], equipeAniv||[]);
   renderGoogleAgenda();
 }
 
@@ -240,7 +277,7 @@ function renderTarefasHoje(tarefas){
   const cont = document.getElementById('tarefasHoje');
 
   if(relevantes.length===0){
-    cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhuma tarefa vencendo hoje. 🎉</p>';
+    cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhuma tarefa vencendo hoje.</p>';
     return;
   }
 
@@ -267,19 +304,16 @@ function renderGoogleAgenda(){
     </div>`;
     return;
   }
-  const src = `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(GOOGLE_CALENDAR_EMAIL)}&ctz=America%2FSao_Paulo&mode=WEEK&showTitle=0&showPrint=0&showCalendars=0`;
+  const src = `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(GOOGLE_CALENDAR_EMAIL)}&ctz=America%2FSao_Paulo&mode=WEEK&showTitle=0&showPrint=0&showCalendars=0&showTz=0`;
   cont.innerHTML = `<div class="card" style="padding:0;overflow:hidden;">
-    <iframe src="${src}" style="border:0;width:100%;height:480px;display:block;" frameborder="0" scrolling="no"></iframe>
+    <p class="label" style="margin:12px 0 0 14px;">Agenda do Google</p>
+    <iframe src="${src}" style="border:0;width:100%;height:220px;display:block;" frameborder="0" scrolling="no"></iframe>
   </div>`;
 }
 
-const ICONES_REDE = {
-  facebook:'📘', instagram:'📷', pinterest:'📌', whatsapp:'💬',
-  site:'🌐', 'one drive':'☁️', onedrive:'☁️', biolinky:'🔗', linkedin:'💼', tiktok:'🎵', youtube:'▶️'
-};
+const ICONES_REDE = {};
 function iconePara(nome){
-  const chave = (nome||'').trim().toLowerCase();
-  return ICONES_REDE[chave] || '🔗';
+  return '';
 }
 
 function renderResumoProjetos(projetos, execucao){
@@ -290,7 +324,7 @@ function renderResumoProjetos(projetos, execucao){
     const ex = execMap.get(p.id) || { percentual_execucao:0 };
     const nomeCliente = p.clientes?.nome_completo || p.cliente || '';
     return `<div class="card proj-card proj-card-mini" onclick="navigate('projeto-detalhe',{projetoId:'${p.id}'})">
-      <div class="proj-thumb" style="${p.capa_url ? `background-image:url('${esc(p.capa_url)}');` : ''}">${p.capa_url ? '' : '<span>🏠</span>'}</div>
+      <div class="proj-thumb" style="${p.capa_url ? `background-image:url('${esc(p.capa_url)}');` : ''}">${p.capa_url ? '' : ''}</div>
       <p class="proj-title" style="font-size:13.5px;margin:10px 0 1px;">${esc(p.nome)}</p>
       ${nomeCliente ? `<p class="proj-client" style="font-size:12px;margin-bottom:8px;">${esc(nomeCliente)}</p>` : ''}
       <div class="bar"><div style="width:${ex.percentual_execucao}%"></div></div>
@@ -305,7 +339,7 @@ function renderLinksRapidos(linksRede, linksConhecimento){
     ? '<p class="muted" style="font-size:13px;">Nenhum link ainda — adicione o Instagram, WhatsApp, site...</p>'
     : linksRede.map(l => `
       <div class="quicklink-item">
-        <a href="${esc(l.url)}" target="_blank" rel="noopener">${iconePara(l.nome)} ${esc(l.nome)}</a>
+        <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.nome)}</a>
         <button class="remove-link" onclick="excluirLinkRapido('${l.id}')">×</button>
       </div>`).join('');
 
@@ -401,7 +435,7 @@ function renderAniversarios(clientesAniv, equipeAniv){
       <div class="compromisso-row">
         <div class="datebox"><p class="day">${a.proxima.toLocaleDateString('pt-BR',{day:'2-digit'})}</p><p class="mon">${a.proxima.toLocaleDateString('pt-BR',{month:'short'})}</p></div>
         <div>
-          <p style="font-size:14px;margin:0;">🎂 ${esc(a.nome)}</p>
+          <p style="font-size:14px;margin:0;">${esc(a.nome)}</p>
           <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${a.tipo}</p>
         </div>
       </div>
@@ -557,12 +591,14 @@ function trocarAbaProjeto(tab){
   document.querySelectorAll('.pd-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
   if(tab==='anexos') loadAnexos();
   if(tab==='checklist') loadChecklistRevisao();
+  if(tab==='aprovacoes') loadAprovacoes();
 }
 
-async function loadProjetoDetalhe(projetoId){
+async function loadProjetoDetalhe(projetoId, abaAlvo){
   const trocandoDeProjeto = projetoAtualId !== projetoId;
   projetoAtualId = projetoId;
-  if(trocandoDeProjeto) abaProjetoAtual = 'geral';
+  if(abaAlvo) abaProjetoAtual = abaAlvo;
+  else if(trocandoDeProjeto) abaProjetoAtual = 'geral';
   trocarAbaProjeto(abaProjetoAtual);
 
   const [
@@ -612,7 +648,7 @@ async function loadProjetoDetalhe(projetoId){
     ? '<p class="muted" style="font-size:12.5px;">Nenhum ambiente cadastrado ainda.</p>'
     : ambientes.map(a => `<span class="chip on" style="cursor:default;">
         ${esc(a.nome)}
-        <button onclick="duplicarAmbiente('${a.id}','${esc(a.nome).replace(/'/g,"\\'")}')" title="Duplicar com o checklist inteiro" style="background:none;border:none;color:inherit;cursor:pointer;font-size:11px;margin-left:6px;">⧉</button>
+        <button onclick="duplicarAmbiente('${a.id}','${esc(a.nome).replace(/'/g,"\\'")}')" title="Duplicar com o checklist inteiro" style="background:none;border:none;color:inherit;cursor:pointer;font-size:12px;margin-left:6px;">⧉</button>
         <button onclick="excluirAmbiente('${a.id}')" style="background:none;border:none;color:inherit;cursor:pointer;font-size:12px;margin-left:2px;">×</button>
       </span>`).join('');
 
@@ -638,7 +674,7 @@ async function loadProjetoDetalhe(projetoId){
         return `<div class="checklist-ambiente">
           <div class="checklist-ambiente-titulo">
             <span>${esc(amb.nome)}</span>
-            <span class="mono" style="font-size:10px;color:var(--graphite);">${itens.filter(i=>i.status==='concluida').length}/${itens.length}</span>
+            <span class="mono" style="font-size:11px;color:var(--graphite);">${itens.filter(i=>i.status==='concluida').length}/${itens.length}</span>
           </div>
           ${itens.map(i => `
             <div class="checklist-item">
@@ -658,7 +694,7 @@ async function loadProjetoDetalhe(projetoId){
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
           <button class="btn-ghost" style="text-align:left;padding:0;flex:1;" onclick="alternarEtapaStatus('${et.id}','${et.status}')">
             <span style="font-size:14px;color:var(--ink);font-weight:500;">${esc(et.nome)}</span>
-            <span class="mono" style="font-size:10px;text-transform:uppercase;color:var(--graphite);display:block;margin-top:2px;">${et.status==='pendente'?'Pendente':et.status==='em_andamento'?'Em andamento':'Concluída'} · clique pra avançar</span>
+            <span class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);display:block;margin-top:2px;">${et.status==='pendente'?'Pendente':et.status==='em_andamento'?'Em andamento':'Concluída'} · clique pra avançar</span>
           </button>
           <div style="display:flex;gap:8px;flex-shrink:0;">
             <button class="edit-link" onclick="abrirModalEditarEtapa('${et.id}')">editar</button>
@@ -676,15 +712,15 @@ async function loadProjetoDetalhe(projetoId){
         ${et.resumo ? `<p style="font-size:12.5px;color:var(--graphite);margin:0 0 8px;">${esc(et.resumo)}</p>` : ''}
 
         <div style="border-top:1px solid var(--line);padding-top:10px;margin-top:4px;">
-          <p class="mono" style="font-size:10.5px;text-transform:uppercase;color:var(--graphite);margin:0 0 8px;">Checklist</p>
+          <p class="mono" style="font-size:11.5px;text-transform:uppercase;color:var(--graphite);margin:0 0 8px;">Checklist</p>
           ${gruposChecklist}
         </div>
 
         <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:8px;margin-top:10px;">
-          <span class="mono" style="font-size:10.5px;text-transform:uppercase;color:${et.termo_status==='assinado'?'var(--sage)':'var(--graphite)'};">Termo: ${et.termo_status==='assinado'?'Assinado':'Pendente'}</span>
+          <span class="mono" style="font-size:11.5px;text-transform:uppercase;color:${et.termo_status==='assinado'?'var(--sage)':'var(--graphite)'};">Termo: ${et.termo_status==='assinado'?'Assinado':'Pendente'}</span>
           <div style="display:flex;gap:8px;">
-            <button class="btn-ghost" style="font-size:11px;padding:0;" onclick="abrirTermoEtapa('${et.id}')">ver termo</button>
-            ${et.termo_status!=='assinado' ? `<button class="btn-ghost" style="font-size:11px;color:var(--sage);padding:0;" onclick="marcarTermoAssinado('${et.id}')">marcar assinado</button>` : ''}
+            <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="abrirTermoEtapa('${et.id}')">ver termo</button>
+            ${et.termo_status!=='assinado' ? `<button class="btn-ghost" style="font-size:12px;color:var(--sage);padding:0;" onclick="marcarTermoAssinado('${et.id}')">marcar assinado</button>` : ''}
           </div>
         </div>
       </div>`;
@@ -705,7 +741,7 @@ async function loadProjetoDetalhe(projetoId){
           </div>
         </div>
         <div style="margin:6px 0;">
-          ${nomeEtapa ? `<span class="badge line">📍 ${esc(nomeEtapa)}</span>` : ''}
+          ${nomeEtapa ? `<span class="badge line">${esc(nomeEtapa)}</span>` : ''}
           ${t.ambientes?.nome ? `<span class="badge clay">${esc(t.ambientes.nome)}</span>` : ''}
           ${resp.map(n=>`<span class="badge line">${esc(n)}</span>`).join('')}
         </div>
@@ -726,10 +762,10 @@ async function loadProjetoDetalhe(projetoId){
       <div class="task-card" style="display:flex;justify-content:space-between;align-items:center;">
         <div>
           <p style="font-size:13.5px;margin:0;">${esc(p.descricao || 'Parcela')}</p>
-          <p style="font-size:11px;color:var(--graphite);margin:2px 0 0;">${fmtMoeda(p.valor)} · ${fmtDataBR(p.vencimento)}</p>
+          <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${fmtMoeda(p.valor)} · ${fmtDataBR(p.vencimento)}</p>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
-          ${p.status!=='pago' ? `<button class="btn-ghost" style="font-size:11px;color:var(--sage);padding:0;" onclick="marcarParcelaProjetoPaga('${p.id}')">marcar pago</button>` : ''}
+          ${p.status!=='pago' ? `<button class="btn-ghost" style="font-size:12px;color:var(--sage);padding:0;" onclick="marcarParcelaProjetoPaga('${p.id}')">marcar pago</button>` : ''}
           <button class="remove-link" onclick="excluirParcelaProjeto('${p.id}')">remover</button>
         </div>
       </div>`).join('');
@@ -745,7 +781,7 @@ async function loadProjetoDetalhe(projetoId){
         <span style="font-weight:600;">Lucro estimado</span>
         <span style="font-weight:600;color:${lucro>=0?CORES.pago:CORES.atrasado};">${fmtMoeda(lucro)}</span>
       </div>
-      <p class="muted" style="font-size:11px;margin:10px 0 0;">Só conta parcelas e despesas já marcadas como pagas, e horas registradas no cronômetro. Cadastre o "custo por hora" de cada pessoa em Equipe pra esse número ficar mais preciso.</p>
+      <p class="muted" style="font-size:12px;margin:10px 0 0;">Só conta parcelas e despesas já marcadas como pagas, e horas registradas no cronômetro. Cadastre o "custo por hora" de cada pessoa em Equipe pra esse número ficar mais preciso.</p>
     `;
   } else {
     document.getElementById('cardRentabilidade').innerHTML = '<p class="muted">Sem dados suficientes ainda.</p>';
@@ -781,7 +817,7 @@ async function loadProjetoDetalhe(projetoId){
           ${r.objetivo_visita ? `<p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${esc(r.objetivo_visita)}</p>` : ''}
         </div>
         <div style="display:flex;gap:10px;">
-          <button class="btn-ghost" style="font-size:11px;padding:0;" onclick="abrirRelatorio('${r.id}')">ver / imprimir</button>
+          <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="abrirRelatorio('${r.id}')">ver / imprimir</button>
           <button class="remove-link" onclick="excluirRelatorio('${r.id}')">remover</button>
         </div>
       </div>`).join('');
@@ -1257,7 +1293,7 @@ function renderKanbanTarefas(){
             ${t.terceirizado ? '<span class="badge clay">Terceirizado</span>' : ''}
             ${resp.map(n => `<span class="badge line">${esc(n)}</span>`).join('')}
           </div>
-          ${t.prazo ? `<p style="font-size:11px;margin:0 0 8px;color:${atrasada?'var(--alert)':'var(--graphite)'};">Prazo: ${fmtDataBR(t.prazo)}</p>` : ''}
+          ${t.prazo ? `<p style="font-size:12px;margin:0 0 8px;color:${atrasada?'var(--alert)':'var(--graphite)'};">Prazo: ${fmtDataBR(t.prazo)}</p>` : ''}
           ${tempoAberto
             ? `<div class="timer-box running">
                 <p class="timer-box-label"><span class="timer-dot"></span>Cronômetro rodando</p>
@@ -1298,14 +1334,14 @@ function renderListaFlatTarefas(){
   if(tarefasVisiveis.length===0){ cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhuma tarefa nesse filtro.</p>'; return; }
 
   cont.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:12px;padding:10px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;color:var(--graphite);border-bottom:1px solid var(--line);">
+    <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:12px;padding:10px 18px;font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;color:var(--graphite);border-bottom:1px solid var(--line);">
       <span>Tarefa / Projeto</span><span>Responsáveis</span><span>Prazo</span><span>Status</span><span></span>
     </div>
     ${tarefasVisiveis.map(t => {
       const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
       const resp = (respPorTarefa.get(t.id) || []).join(', ');
       return `<div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:12px;padding:11px 18px;align-items:center;border-bottom:1px solid var(--line);font-size:13.5px;">
-        <div><p style="margin:0;">${esc(t.titulo)}</p><p style="margin:2px 0 0;font-size:11.5px;color:var(--graphite);">${esc(t.projetos?.nome||'')}${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p></div>
+        <div><p style="margin:0;">${esc(t.titulo)}</p><p style="margin:2px 0 0;font-size:12.5px;color:var(--graphite);">${esc(t.projetos?.nome||'')}${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p></div>
         <span style="font-size:12px;color:var(--graphite);">${esc(resp)||'—'}</span>
         <span style="font-size:12px;color:${atrasada?'var(--alert)':'var(--graphite)'};white-space:nowrap;">${t.prazo?fmtDataBR(t.prazo):'—'}</span>
         <span class="pill" style="color:${atrasada?'var(--alert)':STATUS_PILL_COR[t.status]};border-color:${atrasada?'var(--alert)':STATUS_PILL_COR[t.status]};white-space:nowrap;">${atrasada?'Atrasada':STATUS_TAREFA_LABEL[t.status]}</span>
@@ -1377,6 +1413,7 @@ function statusEfetivoGenerico(item){
 }
 
 async function loadFluxoCaixa(){
+  await ensureChartJs();
   const [{ data: parcelas }, { data: despesas }] = await Promise.all([
     sb.from('financeiro_parcelas').select('valor,vencimento,status'),
     sb.from('despesas').select('valor,vencimento,status'),
@@ -1420,6 +1457,7 @@ async function loadFluxoCaixa(){
 }
 
 async function loadContasReceber(){
+  await ensureChartJs();
   document.getElementById('fgProjeto').dataset.opcional = 'false';
   await preencherSelectProjetos('fgProjeto');
 
@@ -1449,7 +1487,7 @@ async function loadContasReceber(){
     : window._parcelas.map(p => {
       const s = statusEfetivo(p);
       return `<tr>
-        <td><p style="margin:0;">${esc(p.descricao||'Parcela')}</p><p style="margin:2px 0 0;font-size:11px;color:var(--graphite);">${esc(p.projetos?.nome||'')}</p></td>
+        <td><p style="margin:0;">${esc(p.descricao||'Parcela')}</p><p style="margin:2px 0 0;font-size:12px;color:var(--graphite);">${esc(p.projetos?.nome||'')}</p></td>
         <td>${fmtDataBR(p.vencimento)}</td>
         <td>${fmtMoeda(p.valor)}</td>
         <td>${s==='pago'
@@ -1582,7 +1620,7 @@ async function loadOrcamentos(){
     ? '<tr><td colspan="4" class="muted">Nenhum orçamento lançado ainda.</td></tr>'
     : window._orcamentos.map(o => `
       <tr>
-        <td><p style="margin:0;">${esc(o.descricao||'Orçamento')}</p><p style="margin:2px 0 0;font-size:11px;color:var(--graphite);">${esc(o.projetos?.nome||'')}${o.fornecedores?.nome?` · ${esc(o.fornecedores.nome)}`:''}</p></td>
+        <td><p style="margin:0;">${esc(o.descricao||'Orçamento')}</p><p style="margin:2px 0 0;font-size:12px;color:var(--graphite);">${esc(o.projetos?.nome||'')}${o.fornecedores?.nome?` · ${esc(o.fornecedores.nome)}`:''}</p></td>
         <td>${fmtMoeda(o.valor)}</td>
         <td><select class="pill" style="color:${STATUS_ORC_COR[o.status]};border-color:${STATUS_ORC_COR[o.status]};" onchange="atualizarStatusOrcamento('${o.id}', this.value)">
           ${Object.entries(STATUS_ORC_LABEL).map(([v,l]) => `<option value="${v}" ${v===o.status?'selected':''}>${l}</option>`).join('')}
@@ -1616,6 +1654,7 @@ function fmtHoras(segundos){
 }
 
 async function loadEquipe(){
+  await ensureChartJs();
   const [{ data: equipe }, { data: produtividade }] = await Promise.all([
     sb.from('equipe').select('id,nome,funcao,ativo').order('nome'),
     sb.from('v_produtividade_equipe').select('equipe_id,nome,tarefas_com_registro,tempo_total_segundos,tarefas_concluidas'),
@@ -1627,7 +1666,7 @@ async function loadEquipe(){
     : equipe.map(m => {
       const p = prodMap.get(m.id);
       return `<tr>
-        <td><p style="margin:0;">${esc(m.nome)}</p>${m.funcao?`<p style="margin:2px 0 0;font-size:11px;color:var(--graphite);">${esc(m.funcao)}</p>`:''}</td>
+        <td><p style="margin:0;">${esc(m.nome)}</p>${m.funcao?`<p style="margin:2px 0 0;font-size:12px;color:var(--graphite);">${esc(m.funcao)}</p>`:''}</td>
         <td>${p?.tarefas_concluidas || 0}</td>
         <td>${fmtHoras(p?.tempo_total_segundos || 0)}</td>
         <td><button class="pill" style="color:${m.ativo?'var(--sage)':'var(--graphite)'};border-color:${m.ativo?'var(--sage)':'var(--line)'};" onclick="alternarAtivoMembro('${m.id}', ${m.ativo})">${m.ativo?'Ativo':'Inativo'}</button></td>
@@ -1716,7 +1755,7 @@ async function loadClientes(){
         <p class="proj-title">${esc(c.nome_completo)}</p>
         ${c.telefones ? `<p style="font-size:13px;color:var(--graphite);margin:2px 0;">${esc(c.telefones)}</p>` : ''}
         ${c.email ? `<p style="font-size:13px;color:var(--graphite);margin:2px 0;">${esc(c.email)}</p>` : ''}
-        ${c.obra_endereco ? `<p style="font-size:12px;color:var(--graphite);margin:6px 0 0;">📍 ${esc(c.obra_endereco)}</p>` : ''}
+        ${c.obra_endereco ? `<p style="font-size:12px;color:var(--graphite);margin:6px 0 0;">${esc(c.obra_endereco)}</p>` : ''}
       </div>`).join('');
 }
 
@@ -2154,7 +2193,7 @@ async function loadAnexos(){
     : anexos.map(a => `
       <div class="task-card" style="display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <a href="${esc(a.url)}" target="_blank" rel="noopener" style="font-size:13.5px;color:var(--ink);">📎 ${esc(a.nome_arquivo)}</a>
+          <a href="${esc(a.url)}" target="_blank" rel="noopener" style="font-size:13.5px;color:var(--ink);">${esc(a.nome_arquivo)}</a>
           <div style="margin-top:4px;">
             ${a.etapas?.nome ? `<span class="badge line">${esc(a.etapas.nome)}</span>` : ''}
             ${a.tarefas?.titulo ? `<span class="badge line">${esc(a.tarefas.titulo)}</span>` : ''}
@@ -2192,7 +2231,7 @@ async function excluirAnexo(id){
 function renderRecados(recados){
   const cont = document.getElementById('listaRecados');
   if(recados.length===0){
-    cont.innerHTML = '<p class="muted" style="padding:4px;">Nenhum recado ainda — seja a primeira pessoa a deixar um "bom dia" por aqui. 👋</p>';
+    cont.innerHTML = '<p class="muted" style="padding:4px;">Nenhum recado ainda — seja a primeira pessoa a deixar um "bom dia" por aqui.</p>';
     return;
   }
   cont.innerHTML = recados.map((r, i) => {
@@ -2205,7 +2244,7 @@ function renderRecados(recados){
     return `<div class="recado ${i % 2 === 0 ? 'tom-a' : 'tom-b'}">
       <div class="recado-topo">
         <span class="recado-autor">${esc(r.autor_nome)}</span>
-        <span class="recado-hora">${quando} · <button class="btn-ghost" style="padding:0;font-size:11px;color:var(--graphite);" onclick="excluirRecado('${r.id}')">remover</button></span>
+        <span class="recado-hora">${quando} · <button class="btn-ghost" style="padding:0;font-size:12px;color:var(--graphite);" onclick="excluirRecado('${r.id}')">remover</button></span>
       </div>
       <p class="recado-texto">${esc(r.texto)}</p>
     </div>`;
@@ -2259,7 +2298,7 @@ async function loadDespesas(){
     : window._despesas.map(d => {
       const s = statusEfetivoGenerico(d);
       return `<tr>
-        <td><p style="margin:0;">${esc(d.descricao)}</p><p style="margin:2px 0 0;font-size:11px;color:var(--graphite);">${esc(d.categoria||'')}${d.projetos?.nome ? ' · '+esc(d.projetos.nome) : ''}</p></td>
+        <td><p style="margin:0;">${esc(d.descricao)}</p><p style="margin:2px 0 0;font-size:12px;color:var(--graphite);">${esc(d.categoria||'')}${d.projetos?.nome ? ' · '+esc(d.projetos.nome) : ''}</p></td>
         <td>${fmtDataBR(d.vencimento)}</td>
         <td>${fmtMoeda(d.valor)}</td>
         <td>${s==='pago'
@@ -2389,9 +2428,9 @@ async function abrirModalEditarTarefa(tarefaId){
     <p class="label" style="margin-bottom:14px;">Editar tarefa</p>
     <form onsubmit="salvarEdicaoTarefa(event,'${tarefaId}')">
       <input id="edTarTitulo" required value="${esc(tarefa.titulo)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
-      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Prazo</label>
+      <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Prazo</label>
       <input id="edTarPrazo" type="date" value="${tarefa.prazo || ''}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
-      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Ambiente</label>
+      <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Ambiente</label>
       <select id="edTarAmbiente" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;">
         <option value="">Sem ambiente</option>
         ${(ambientesProjeto||[]).map(a => `<option value="${a.id}" ${a.id===tarefa.ambiente_id?'selected':''}>${esc(a.nome)}</option>`).join('')}
@@ -2412,7 +2451,7 @@ async function abrirModalEditarTarefa(tarefaId){
           ? '<p class="muted" style="font-size:12.5px;">Nenhum comentário ainda.</p>'
           : comentarios.map(c => `
             <div style="margin-bottom:10px;">
-              <p style="font-size:12px;margin:0;"><b>${esc(c.autor_nome)}</b> <span style="color:var(--graphite);font-size:11px;">${new Date(c.criado_em).toLocaleDateString('pt-BR')} ${new Date(c.criado_em).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span></p>
+              <p style="font-size:12px;margin:0;"><b>${esc(c.autor_nome)}</b> <span style="color:var(--graphite);font-size:12px;">${new Date(c.criado_em).toLocaleDateString('pt-BR')} ${new Date(c.criado_em).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span></p>
               <p style="font-size:13px;margin:2px 0 0;">${esc(c.texto)}</p>
             </div>`).join('')}
       </div>
@@ -2420,7 +2459,7 @@ async function abrirModalEditarTarefa(tarefaId){
         <input id="comAutor" required value="${esc(nomeSalvoComentario)}" placeholder="Seu nome" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:7px 9px;margin-bottom:6px;font-size:12.5px;" />
         <div style="display:flex;gap:6px;">
           <input id="comTexto" required placeholder="Escrever um comentário..." style="flex:1;border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:12.5px;" />
-          <button class="btn" style="padding:7px 12px;font-size:10.5px;">Enviar</button>
+          <button class="btn" style="padding:7px 12px;font-size:11.5px;">Enviar</button>
         </div>
       </form>
     </div>
@@ -2740,19 +2779,19 @@ async function loadChecklistRevisao(){
           <p class="label" style="margin:0;">Revisão nº ${atual.numero}</p>
           <p class="muted" style="margin:2px 0 0;">Checklist de revisão do Projeto Executivo</p>
         </div>
-        <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:11px;" onclick="iniciarNovaRevisaoChecklist()">+ Nova revisão</button>
+        <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="iniciarNovaRevisaoChecklist()">+ Nova revisão</button>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
         <div>
-          <label class="mono" style="font-size:10px;text-transform:uppercase;color:var(--graphite);">Revisado por</label>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Revisado por</label>
           <input value="${esc(atual.revisado_por||'')}" onblur="atualizarCabecalhoRevisao('${atual.id}',this.value,null,null)" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;" />
         </div>
         <div>
-          <label class="mono" style="font-size:10px;text-transform:uppercase;color:var(--graphite);">Data</label>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Data</label>
           <input type="date" value="${atual.data_revisao||''}" onchange="atualizarCabecalhoRevisao('${atual.id}',null,this.value,null)" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;" />
         </div>
         <div>
-          <label class="mono" style="font-size:10px;text-transform:uppercase;color:var(--graphite);">Status</label>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Status</label>
           <select onchange="atualizarCabecalhoRevisao('${atual.id}',null,null,this.value)" style="width:100%;border:1px solid ${STATUS_REV_COR[atual.status_geral]};color:${STATUS_REV_COR[atual.status_geral]};border-radius:8px;padding:7px 9px;font-size:12.5px;">
             ${Object.entries(STATUS_REV_LABEL).map(([v,l]) => `<option value="${v}" ${v===atual.status_geral?'selected':''}>${l}</option>`).join('')}
           </select>
@@ -2820,4 +2859,104 @@ async function atualizarCabecalhoRevisao(checklistId, revisadoPor, dataRevisao, 
   if(statusGeral!==null) atualizacao.status_geral = statusGeral;
   await sb.from('checklist_revisao').update(atualizacao).eq('id', checklistId);
   if(statusGeral!==null) loadChecklistRevisao();
+}
+
+/* ================= APROVAÇÕES DO CLIENTE (via portal) ================= */
+const TIPO_APROVACAO_LABEL = { briefing:'Briefing', estudo_preliminar:'Estudo Preliminar', executivo:'Projeto Executivo', imagens_3d:'Imagens 3D', outro:'Outro' };
+const STATUS_APROVACAO_LABEL = { pendente:'Aguardando cliente', aprovado:'Aprovado', alteracoes:'Ajustes solicitados' };
+const STATUS_APROVACAO_COR = { pendente:'var(--clay)', aprovado:'var(--sage)', alteracoes:'var(--alert)' };
+
+function ajustarTituloAprovacao(){
+  const tipo = document.getElementById('apTipo').value;
+  const campoTitulo = document.getElementById('apTitulo');
+  if(!campoTitulo.value.trim() || Object.values(TIPO_APROVACAO_LABEL).some(l => campoTitulo.value === `Aprovação — ${l}`)){
+    campoTitulo.value = `Aprovação — ${TIPO_APROVACAO_LABEL[tipo]}`;
+  }
+}
+
+async function loadAprovacoes(){
+  const [{ data: aprovacoes }, { data: etapas }] = await Promise.all([
+    sb.from('aprovacoes_cliente').select('id,tipo,titulo,descricao,status,comentario_cliente,data_resposta,criado_em,visto_pela_equipe,etapa_id,etapas(nome),aprovacao_imagens(url)').eq('projeto_id', projetoAtualId).order('criado_em', { ascending: false }),
+    sb.from('etapas').select('id,nome').eq('projeto_id', projetoAtualId),
+  ]);
+
+  document.getElementById('apEtapa').innerHTML = '<option value="">Sem etapa vinculada</option>' +
+    (etapas||[]).map(et => `<option value="${et.id}">${esc(et.nome)}</option>`).join('');
+
+  // Abrir essa aba já conta como "a equipe viu" as respostas do cliente
+  const naoVistas = (aprovacoes||[]).filter(a => a.status!=='pendente' && !a.visto_pela_equipe);
+  if(naoVistas.length > 0){
+    await sb.from('aprovacoes_cliente').update({ visto_pela_equipe: true }).in('id', naoVistas.map(a => a.id));
+  }
+
+  const cont = document.getElementById('listaAprovacoes');
+  if(!aprovacoes || aprovacoes.length===0){
+    cont.innerHTML = '<p class="muted">Nenhuma aprovação pedida ainda.</p>';
+    return;
+  }
+  cont.innerHTML = aprovacoes.map(a => `
+    <div class="task-card">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+        <div>
+          <span class="badge line">${TIPO_APROVACAO_LABEL[a.tipo]}</span>
+          ${a.etapas?.nome ? `<span class="badge line">${esc(a.etapas.nome)}</span>` : ''}
+          <p style="font-size:14px;font-weight:500;margin:6px 0 0;">${esc(a.titulo)}</p>
+        </div>
+        <button class="remove-link" onclick="excluirAprovacao('${a.id}')">remover</button>
+      </div>
+      ${a.descricao ? `<p style="font-size:12.5px;color:var(--graphite);margin:6px 0;">${esc(a.descricao)}</p>` : ''}
+      ${(a.aprovacao_imagens||[]).length>0 ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;">${a.aprovacao_imagens.map(img => `<div class="proj-thumb" style="width:70px;height:70px;background-image:url('${esc(img.url)}');margin:0;"></div>`).join('')}</div>` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+        <span class="pill" style="color:${STATUS_APROVACAO_COR[a.status]};border-color:${STATUS_APROVACAO_COR[a.status]};">${STATUS_APROVACAO_LABEL[a.status]}</span>
+        ${a.status==='pendente' ? `<button class="btn-ghost" style="font-size:12px;color:var(--sage);padding:0;" onclick="marcarAprovacaoManual('${a.id}')">marcar aprovado manualmente</button>` : ''}
+      </div>
+      ${a.comentario_cliente ? `<div style="background:var(--paper);border-radius:9px;padding:8px 10px;margin-top:8px;"><p class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);margin:0 0 3px;">Comentário do cliente</p><p style="font-size:12.5px;margin:0;">${esc(a.comentario_cliente)}</p></div>` : ''}
+    </div>`).join('');
+}
+
+async function uploadImagemAprovacao(file){
+  const ext = file.name.split('.').pop();
+  const nomeArquivo = `${crypto.randomUUID ? crypto.randomUUID() : Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await sb.storage.from('aprovacoes-imagens').upload(nomeArquivo, file);
+  if(error){ alert('Não consegui enviar uma das imagens: ' + error.message); return null; }
+  const { data } = sb.storage.from('aprovacoes-imagens').getPublicUrl(nomeArquivo);
+  return data?.publicUrl || null;
+}
+
+async function criarAprovacao(e){
+  e.preventDefault();
+  const titulo = document.getElementById('apTitulo').value.trim();
+  if(!titulo) return;
+
+  const resultado = await sb.from('aprovacoes_cliente').insert({
+    projeto_id: projetoAtualId,
+    tipo: document.getElementById('apTipo').value,
+    titulo,
+    etapa_id: document.getElementById('apEtapa').value || null,
+    descricao: document.getElementById('apDescricao').value.trim() || null,
+  }).select('id').single();
+  if(checarErro(resultado, 'criar aprovação')) return;
+
+  const arquivos = Array.from(document.getElementById('apImagens').files || []);
+  if(arquivos.length > 0){
+    const urls = await Promise.all(arquivos.map(uploadImagemAprovacao));
+    const validas = urls.filter(Boolean);
+    if(validas.length > 0){
+      await sb.from('aprovacao_imagens').insert(validas.map((url, i) => ({ aprovacao_id: resultado.data.id, url, ordem: i })));
+    }
+  }
+
+  e.target.reset();
+  toggleForm('formNovaAprovacao', false);
+  loadAprovacoes();
+}
+
+async function marcarAprovacaoManual(id){
+  if(!confirm('Marcar como aprovado manualmente? Use isso só se o cliente aprovou por fora do sistema (WhatsApp, e-mail, presencial).')) return;
+  await sb.from('aprovacoes_cliente').update({ status: 'aprovado', data_resposta: new Date().toISOString() }).eq('id', id);
+  loadAprovacoes();
+}
+async function excluirAprovacao(id){
+  await sb.from('aprovacoes_cliente').delete().eq('id', id);
+  loadAprovacoes();
 }

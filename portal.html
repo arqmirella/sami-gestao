@@ -19,7 +19,7 @@
   .mono{font-family:'IBM Plex Mono',monospace;}
   .wrap{max-width:640px;margin:0 auto;padding:48px 24px 80px;}
   .logo{width:64px;height:64px;object-fit:contain;margin-bottom:18px;}
-  .label{font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--graphite);margin:0 0 6px;}
+  .label{font-family:'IBM Plex Mono',monospace;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--graphite);margin:0 0 6px;}
   h1{font-size:24px;margin:0 0 4px;}
   .cliente{color:var(--graphite);font-size:14px;margin:0 0 24px;}
   .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px;box-shadow:0 1px 2px rgba(33,28,24,.04);margin-bottom:20px;}
@@ -30,12 +30,38 @@
   .etapa:last-child{border-bottom:none;}
   .etapa-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
   .etapa-nome{font-size:14px;font-weight:500;}
-  .etapa-status{font-size:11px;padding:2px 8px;border-radius:99px;}
-  .etapa-datas{font-size:11.5px;color:var(--graphite);margin-top:4px;}
+  .etapa-status{font-size:12px;padding:2px 8px;border-radius:99px;}
+  .etapa-datas{font-size:12.5px;color:var(--graphite);margin-top:4px;}
   .compromisso{padding:10px 0;border-bottom:1px solid var(--paper);font-size:13.5px;}
   .compromisso:last-child{border-bottom:none;}
   .compromisso .data{color:var(--terracotta);font-weight:600;font-family:'Space Grotesk',sans-serif;}
-  .footer{text-align:center;font-size:11px;color:var(--graphite);margin-top:40px;}
+  .footer{text-align:center;font-size:12px;color:var(--graphite);margin-top:40px;}
+  .aprov-card{border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;}
+  .aprov-tipo{font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;color:var(--terracotta);letter-spacing:.04em;}
+  .aprov-titulo{font-size:15px;font-weight:600;margin:4px 0 6px;}
+  .aprov-desc{font-size:13px;color:var(--graphite);margin:0 0 10px;}
+  .aprov-imgs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+  .aprov-imgs img{width:100px;height:100px;object-fit:cover;border-radius:8px;cursor:pointer;}
+  .aprov-botoes{display:flex;gap:8px;flex-wrap:wrap;}
+  .btn-aprovar{background:var(--sage);color:#fff;border:none;border-radius:9px;padding:10px 16px;font-size:13px;cursor:pointer;font-weight:600;}
+  .btn-ajustar{background:#fff;color:var(--alert);border:1px solid var(--alert);border-radius:9px;padding:10px 16px;font-size:13px;cursor:pointer;}
+  .aprov-comentario-box{margin-top:10px;display:none;}
+  .aprov-comentario-box textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px;font-family:inherit;margin-bottom:8px;}
+  .aprov-status-pill{font-size:12px;padding:3px 10px;border-radius:99px;display:inline-block;}
+  .aprov-comentario-lido{background:var(--paper);border-radius:9px;padding:8px 10px;margin-top:8px;font-size:12.5px;}
+
+  /* Lista "Entregas" (miniatura + status + expandir) */
+  .entrega-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--paper);cursor:pointer;}
+  .entrega-row:last-child{border-bottom:none;}
+  .entrega-thumb{width:52px;height:52px;border-radius:9px;background:var(--paper) center/cover no-repeat;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--graphite);}
+  .entrega-info{flex:1;min-width:0;}
+  .entrega-titulo{font-size:14px;margin:0 0 3px;font-weight:500;}
+  .entrega-status-linha{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--graphite);}
+  .entrega-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .entrega-chevron{font-size:20px;color:var(--graphite);flex-shrink:0;transition:transform .15s;}
+  .entrega-chevron.aberto{transform:rotate(90deg);}
+  .entrega-detalhe{padding:0 0 14px 64px;display:none;}
+  .entrega-detalhe.aberto{display:block;}
   .estado{text-align:center;padding:60px 20px;color:var(--graphite);}
 </style>
 </head>
@@ -68,9 +94,15 @@ async function iniciar(){
     cont.innerHTML = '<div class="estado">Link inválido — peça o link correto pro escritório da SAMI.</div>';
     return;
   }
+  window._token = token;
+  window._sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  const { data, error } = await sb.rpc('portal_dados_projeto', { p_token: token });
+  await carregarERenderizar();
+}
+
+async function carregarERenderizar(){
+  const cont = document.getElementById('conteudo');
+  const { data, error } = await window._sb.rpc('portal_dados_projeto', { p_token: window._token });
 
   if(error || !data){
     cont.innerHTML = '<div class="estado">Não encontramos esse projeto. O link pode ter expirado — peça um novo pro escritório da SAMI.</div>';
@@ -78,6 +110,7 @@ async function iniciar(){
   }
 
   const p = data;
+
   cont.innerHTML = `
     <p class="label">SAMI · Arquitetura e Interiores</p>
     <h1>${esc(p.nome)}</h1>
@@ -112,8 +145,66 @@ async function iniciar(){
         </div>`).join('')}
     </div>` : ''}
 
+    ${(p.aprovacoes||[]).length > 0 ? `
+    <div class="card">
+      <p class="label" style="margin-bottom:6px;">Entregas</p>
+      ${p.aprovacoes.map(a => {
+        const cor = a.status==='aprovado' ? '#5C6E5A' : a.status==='alteracoes' ? '#8B3A2B' : '#C1602E';
+        const statusTexto = a.status==='aprovado' ? 'Aprovado' : a.status==='alteracoes' ? 'Alterações solicitadas' : 'Aguardando sua análise';
+        const capa = (a.imagens||[])[0];
+        return `
+        <div class="entrega-row" onclick="toggleEntrega('${a.id}')">
+          <div class="entrega-thumb" style="${capa ? `background-image:url('${esc(capa)}');` : ''}">${capa ? '' : '···'}</div>
+          <div class="entrega-info">
+            <p class="entrega-titulo">${esc(a.titulo)}${a.etapa_nome ? ` <span style="color:var(--graphite);font-weight:400;">· ${esc(a.etapa_nome)}</span>` : ''}</p>
+            <div class="entrega-status-linha"><span class="entrega-dot" style="background:${cor};"></span>${statusTexto}</div>
+          </div>
+          <span class="entrega-chevron" id="chevron-${a.id}">›</span>
+        </div>
+        <div class="entrega-detalhe" id="detalhe-${a.id}">
+          ${a.descricao ? `<p class="aprov-desc">${esc(a.descricao)}</p>` : ''}
+          ${(a.imagens||[]).length>0 ? `<div class="aprov-imgs">${a.imagens.map(url => `<img src="${esc(url)}" onclick="event.stopPropagation();window.open('${esc(url)}','_blank')" />`).join('')}</div>` : ''}
+          ${a.status==='pendente' ? `
+            <div class="aprov-botoes" onclick="event.stopPropagation();">
+              <button class="btn-aprovar" onclick="responderAprovacao('${a.id}','aprovado')">✓ Aprovar</button>
+              <button class="btn-ajustar" onclick="mostrarCaixaComentario('${a.id}')">Solicitar ajuste</button>
+            </div>
+            <div class="aprov-comentario-box" id="comentario-box-${a.id}" onclick="event.stopPropagation();">
+              <textarea id="comentario-texto-${a.id}" rows="3" placeholder="Descreva o que precisa mudar..."></textarea>
+              <button class="btn-ajustar" onclick="responderAprovacao('${a.id}','alteracoes')">Enviar solicitação</button>
+            </div>
+          ` : `${a.comentario_cliente ? `<div class="aprov-comentario-lido">${esc(a.comentario_cliente)}</div>` : ''}`}
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+
     <p class="footer">Essa é uma tela somente de acompanhamento. Qualquer dúvida, fale direto com a equipe da SAMI.</p>
   `;
+}
+
+function toggleEntrega(id){
+  document.getElementById('detalhe-'+id).classList.toggle('aberto');
+  document.getElementById('chevron-'+id).classList.toggle('aberto');
+}
+
+function mostrarCaixaComentario(aprovacaoId){
+  document.getElementById('comentario-box-'+aprovacaoId).style.display = 'block';
+}
+
+async function responderAprovacao(aprovacaoId, status){
+  let comentario = null;
+  if(status==='alteracoes'){
+    comentario = document.getElementById('comentario-texto-'+aprovacaoId).value.trim();
+    if(!comentario){ alert('Descreve rapidinho o que precisa mudar antes de enviar.'); return; }
+  }
+  const { data, error } = await window._sb.rpc('portal_responder_aprovacao', {
+    p_token: window._token, p_aprovacao_id: aprovacaoId, p_status: status, p_comentario: comentario,
+  });
+  if(error || !data){
+    alert('Não consegui enviar sua resposta. Tenta de novo ou fala com o escritório.');
+    return;
+  }
+  await carregarERenderizar();
 }
 
 iniciar();
