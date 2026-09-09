@@ -301,3 +301,21 @@
   .rev-obs{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12.5px;margin-top:8px;}
   .rev-header-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:20px;}
   .rev-hist-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--paper);font-size:12.5px;}
+
+  /* Menu lateral do detalhe do projeto (Planejamento, Obra, Cliente...) */
+  .pd-nav-wrap{display:block;}
+  .pd-sidenav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:22px;}
+  .pd-sidenav .pd-tab{font-family:'IBM Plex Mono',monospace;font-size:11.5px;text-transform:uppercase;letter-spacing:.02em;padding:7px 12px;border-radius:99px;border:1px solid var(--line);background:#fff;color:var(--graphite);cursor:pointer;}
+  .pd-sidenav .pd-tab.on{background:var(--terracotta);color:#fff;border-color:var(--terracotta);}
+  .pd-nav-group{display:none;}
+
+  @media (min-width: 900px){
+    .pd-nav-wrap{display:flex;gap:32px;align-items:flex-start;}
+    .pd-sidenav{flex-direction:column;flex-wrap:nowrap;width:200px;flex-shrink:0;position:sticky;top:24px;gap:1px;margin-bottom:0;background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 12px;}
+    .pd-sidenav .pd-tab{border-radius:9px;border:none;background:none;text-align:left;padding:9px 12px;font-family:'Inter',sans-serif;text-transform:none;letter-spacing:0;font-size:13.5px;color:var(--ink);width:100%;}
+    .pd-sidenav .pd-tab.on{background:var(--terracotta);color:#fff;}
+    .pd-sidenav .pd-tab:not(.on):hover{background:var(--paper);}
+    .pd-nav-group{display:block;font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--graphite);margin:14px 0 3px;padding:0 12px;}
+    .pd-nav-group:first-of-type{margin-top:6px;}
+    .pd-content{flex:1;min-width:0;}
+  }

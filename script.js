@@ -52,6 +52,15 @@ function checarErro(resultado, contexto){
   }
   return false;
 }
+/* Lê um valor em R$ digitado do jeito brasileiro: "1.500,00" ou "1500,00" ou "1500.00" ou "1500" */
+function parseValorBR(texto){
+  if(!texto) return NaN;
+  let limpo = texto.trim();
+  if(limpo.includes(',')){
+    limpo = limpo.replace(/\./g, '').replace(',', '.');
+  }
+  return Number(limpo);
+}
 function fmtDataBR(d){ return new Date(d+'T00:00:00').toLocaleDateString('pt-BR'); }
 function toggleForm(id, show){
   const f = document.getElementById(id);
@@ -1010,22 +1019,81 @@ async function excluirTarefaProjeto(id){
 }
 
 /* ---- Financeiro do projeto ---- */
+function somaMeses(dataStr, n){
+  const d = new Date(dataStr + 'T00:00:00');
+  d.setMonth(d.getMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+async function gerarParcelasContrato(e){
+  e.preventDefault();
+  const total = parseValorBR(document.getElementById('gpTotal').value);
+  const entrada = document.getElementById('gpEntrada').value.trim() ? parseValorBR(document.getElementById('gpEntrada').value) : 0;
+  const dataEntrada = document.getElementById('gpDataEntrada').value;
+  const qtd = parseInt(document.getElementById('gpQtd').value, 10);
+  const primeiraData = document.getElementById('gpPrimeiraData').value;
+
+  if(isNaN(total) || total <= 0){ alert('Digite o valor total do contrato.'); return; }
+  if(entrada > 0 && !dataEntrada){ alert('Coloca a data da entrada.'); return; }
+  if(!qtd || qtd < 1 || !primeiraData){ alert('Preenche o número de parcelas e a data da 1ª.'); return; }
+  if(entrada > total){ alert('A entrada não pode ser maior que o valor total.'); return; }
+
+  const restante = total - entrada;
+  const valorParcela = Math.floor((restante / qtd) * 100) / 100;
+  const diferencaArredondamento = Math.round((restante - valorParcela * qtd) * 100) / 100;
+
+  const novasParcelas = [];
+  if(entrada > 0){
+    novasParcelas.push({ projeto_id: projetoAtualId, descricao: 'Entrada', valor: entrada, vencimento: dataEntrada });
+  }
+  for(let i = 0; i < qtd; i++){
+    const valor = i === qtd - 1 ? valorParcela + diferencaArredondamento : valorParcela;
+    novasParcelas.push({
+      projeto_id: projetoAtualId,
+      descricao: `Parcela ${i+1}/${qtd}`,
+      valor,
+      vencimento: somaMeses(primeiraData, i),
+    });
+  }
+
+  const resultado = await sb.from('financeiro_parcelas').insert(novasParcelas);
+  if(checarErro(resultado, 'gerar parcelas do contrato')) return;
+
+  e.target.reset();
+  toggleForm('formGerarParcelas', false);
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+function atualizarPreviewParcelas(){
+  const preview = document.getElementById('gpPreview');
+  if(!preview) return;
+  const total = parseValorBR(document.getElementById('gpTotal').value);
+  const entrada = document.getElementById('gpEntrada').value.trim() ? parseValorBR(document.getElementById('gpEntrada').value) : 0;
+  const qtd = parseInt(document.getElementById('gpQtd').value, 10);
+  if(isNaN(total) || total<=0 || !qtd || qtd<1){ preview.textContent = ''; return; }
+  const restante = total - entrada;
+  const valorParcela = restante / qtd;
+  preview.textContent = `${qtd}x de ${fmtMoeda(valorParcela)} (total das parcelas: ${fmtMoeda(restante)}${entrada>0?` + entrada de ${fmtMoeda(entrada)}`:''})`;
+}
+
 async function adicionarParcelaProjeto(e){
   e.preventDefault();
   const valor = document.getElementById('fpValor').value;
   const vencimento = document.getElementById('fpVencimento').value;
   if(!valor || !vencimento) return;
-  await sb.from('financeiro_parcelas').insert({
+  const resultado = await sb.from('financeiro_parcelas').insert({
     projeto_id: projetoAtualId,
     descricao: document.getElementById('fpDescricao').value.trim() || null,
-    valor: Number(valor.replace(',', '.')),
+    valor: parseValorBR(valor),
     vencimento,
   });
+  if(checarErro(resultado, 'lançar parcela')) return;
   e.target.reset();
   loadProjetoDetalhe(projetoAtualId);
 }
 async function marcarParcelaProjetoPaga(id){
-  await sb.from('financeiro_parcelas').update({ status: 'pago' }).eq('id', id);
+  const resultado = await sb.from('financeiro_parcelas').update({ status: 'pago' }).eq('id', id);
+  if(checarErro(resultado, 'marcar parcela como paga')) return;
   loadProjetoDetalhe(projetoAtualId);
 }
 async function excluirParcelaProjeto(id){
@@ -1546,19 +1614,24 @@ async function criarParcelaGlobal(e){
   const valor = document.getElementById('fgValor').value;
   const vencimento = document.getElementById('fgVencimento').value;
   if(!projetoId || !valor || !vencimento) return;
-  await sb.from('financeiro_parcelas').insert({
+  const resultado = await sb.from('financeiro_parcelas').insert({
     projeto_id: projetoId,
     descricao: document.getElementById('fgDescricao').value.trim() || null,
-    valor: Number(valor.replace(',', '.')),
+    valor: parseValorBR(valor),
     vencimento,
     forma_pagamento: document.getElementById('fgForma').value.trim() || null,
   });
+  if(checarErro(resultado, 'lançar parcela')) return;
   e.target.reset();
   toggleForm('formNovaParcela', false);
-  loadFinanceiro();
+  loadContasReceber();
 }
-async function marcarParcelaPaga(id){ await sb.from('financeiro_parcelas').update({ status:'pago' }).eq('id', id); loadFinanceiro(); }
-async function excluirParcelaGlobal(id){ await sb.from('financeiro_parcelas').delete().eq('id', id); loadFinanceiro(); }
+async function marcarParcelaPaga(id){
+  const resultado = await sb.from('financeiro_parcelas').update({ status:'pago' }).eq('id', id);
+  if(checarErro(resultado, 'marcar parcela como paga')) return;
+  loadContasReceber();
+}
+async function excluirParcelaGlobal(id){ await sb.from('financeiro_parcelas').delete().eq('id', id); loadContasReceber(); }
 
 /* ================= FORNECEDORES ================= */
 async function loadFornecedores(){
@@ -1640,7 +1713,7 @@ async function criarOrcamento(e){
     projeto_id: projetoId,
     fornecedor_id: document.getElementById('ocFornecedor').value || null,
     descricao: document.getElementById('ocDescricao').value.trim() || null,
-    valor: Number(valor.replace(',', '.')),
+    valor: parseValorBR(valor),
   });
   e.target.reset();
   toggleForm('formOrcamento', false);
@@ -1731,7 +1804,7 @@ async function criarMembro(e){
     nome,
     funcao: document.getElementById('eqFuncao').value.trim() || null,
     data_nascimento: document.getElementById('eqNascimento').value || null,
-    custo_hora: document.getElementById('eqCustoHora').value.trim().replace(',', '.') || null,
+    custo_hora: document.getElementById('eqCustoHora').value.trim() ? parseValorBR(document.getElementById('eqCustoHora').value) : null,
   });
   if(checarErro(resultado, 'cadastrar pessoa')) return;
   e.target.reset();
@@ -2323,7 +2396,7 @@ async function criarDespesa(e){
     descricao,
     categoria: document.getElementById('dpCategoria').value.trim() || null,
     projeto_id: document.getElementById('dpProjeto').value || null,
-    valor: Number(valor.replace(',', '.')),
+    valor: parseValorBR(valor),
     vencimento,
   });
   if(checarErro(resultado, 'lançar despesa')) return;
@@ -2332,7 +2405,8 @@ async function criarDespesa(e){
   loadDespesas();
 }
 async function marcarDespesaPaga(id){
-  await sb.from('despesas').update({ status:'pago' }).eq('id', id);
+  const resultado = await sb.from('despesas').update({ status:'pago' }).eq('id', id);
+  if(checarErro(resultado, 'marcar despesa como paga')) return;
   loadDespesas();
 }
 async function excluirDespesa(id){

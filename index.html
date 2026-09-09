@@ -303,16 +303,29 @@
         </div>
       </div>
 
-      <div class="chip-select" style="margin-bottom:24px;">
-        <button type="button" class="chip pd-tab on" data-tab="geral" onclick="trocarAbaProjeto('geral')">Visão geral</button>
-        <button type="button" class="chip pd-tab" data-tab="etapas" onclick="trocarAbaProjeto('etapas')">Etapas</button>
-        <button type="button" class="chip pd-tab" data-tab="anexos" onclick="trocarAbaProjeto('anexos')">Anexos</button>
-        <button type="button" class="chip pd-tab" data-tab="visitas" onclick="trocarAbaProjeto('visitas')">Visitas</button>
-        <button type="button" class="chip pd-tab" data-tab="relatorios" onclick="trocarAbaProjeto('relatorios')">Relatórios de obra</button>
-        <button type="button" class="chip pd-tab" data-tab="checklist" onclick="trocarAbaProjeto('checklist')">Checklist Executivo</button>
-        <button type="button" class="chip pd-tab" data-tab="aprovacoes" onclick="trocarAbaProjeto('aprovacoes')">Aprovações do cliente</button>
-        <button type="button" class="chip pd-tab" data-tab="dados" onclick="trocarAbaProjeto('dados')">Dados da obra</button>
-      </div>
+      <div class="pd-nav-wrap">
+        <nav class="pd-sidenav">
+          <button type="button" class="pd-tab on" data-tab="geral" onclick="trocarAbaProjeto('geral')">Visão geral</button>
+
+          <p class="pd-nav-group">Planejamento</p>
+          <button type="button" class="pd-tab" data-tab="etapas" onclick="trocarAbaProjeto('etapas')">Etapas</button>
+          <button type="button" class="pd-tab" data-tab="checklist" onclick="trocarAbaProjeto('checklist')">Checklist Executivo</button>
+
+          <p class="pd-nav-group">Obra</p>
+          <button type="button" class="pd-tab" data-tab="visitas" onclick="trocarAbaProjeto('visitas')">Visitas</button>
+          <button type="button" class="pd-tab" data-tab="relatorios" onclick="trocarAbaProjeto('relatorios')">Relatórios de obra</button>
+
+          <p class="pd-nav-group">Cliente</p>
+          <button type="button" class="pd-tab" data-tab="aprovacoes" onclick="trocarAbaProjeto('aprovacoes')">Aprovações do cliente</button>
+
+          <p class="pd-nav-group">Arquivos</p>
+          <button type="button" class="pd-tab" data-tab="anexos" onclick="trocarAbaProjeto('anexos')">Anexos</button>
+
+          <p class="pd-nav-group">Configurações</p>
+          <button type="button" class="pd-tab" data-tab="dados" onclick="trocarAbaProjeto('dados')">Dados da obra</button>
+        </nav>
+
+        <div class="pd-content">
 
       <!-- Sub-aba: Visão geral (Tarefas + Financeiro) -->
       <div id="pdtab-geral" class="pd-tabcontent">
@@ -334,13 +347,45 @@
               <p class="col-label" style="margin:0;">Financeiro</p>
               <p class="mono" id="pdTotalFinanceiro" style="font-size:12px;color:var(--graphite);"></p>
             </div>
+
+            <button class="btn-ghost" style="border:1px solid var(--terracotta);color:var(--terracotta);border-radius:9px;font-size:12px;margin-bottom:10px;width:100%;padding:8px;" onclick="toggleForm('formGerarParcelas')">⚡ Gerar parcelas do contrato</button>
+            <form id="formGerarParcelas" class="hidden" onsubmit="gerarParcelasContrato(event)" style="background:var(--paper);border-radius:9px;padding:10px;margin-bottom:12px;">
+              <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Valor total do contrato</label>
+              <input id="gpTotal" required placeholder="Ex: 25.000,00" oninput="atualizarPreviewParcelas()" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-bottom:8px;" />
+              <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <div style="flex:1;">
+                  <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Entrada (opcional)</label>
+                  <input id="gpEntrada" placeholder="Ex: 5.000,00" oninput="atualizarPreviewParcelas()" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;" />
+                </div>
+                <div style="flex:1;">
+                  <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Data da entrada</label>
+                  <input id="gpDataEntrada" type="date" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;" />
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <div style="flex:1;">
+                  <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Nº de parcelas restantes</label>
+                  <input id="gpQtd" type="number" min="1" required placeholder="Ex: 5" oninput="atualizarPreviewParcelas()" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;" />
+                </div>
+                <div style="flex:1;">
+                  <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">1ª parcela vence em</label>
+                  <input id="gpPrimeiraData" type="date" required style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;" />
+                </div>
+              </div>
+              <p class="muted" id="gpPreview" style="font-size:12px;margin:0 0 8px;"></p>
+              <div class="form-actions">
+                <button type="submit" class="btn">Gerar parcelas</button>
+                <button type="button" class="btn-ghost" onclick="toggleForm('formGerarParcelas', false)">Cancelar</button>
+              </div>
+            </form>
+
             <form onsubmit="adicionarParcelaProjeto(event)" style="margin-bottom:12px;">
               <input id="fpDescricao" placeholder="Descrição" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:6px;" />
               <div style="display:flex;gap:6px;margin-bottom:6px;">
                 <input id="fpValor" placeholder="Valor" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
                 <input id="fpVencimento" type="date" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
               </div>
-              <button class="btn" style="width:100%;">+ Lançar parcela</button>
+              <button class="btn" style="width:100%;">+ Lançar parcela avulsa</button>
             </form>
             <div id="listaParcelasProjeto"></div>
           </div>
@@ -495,6 +540,9 @@
           <p class="label">Portal do cliente</p>
           <p class="muted" style="margin-top:0;">Uma tela simples e só-leitura pra esse cliente acompanhar o progresso, sem precisar de login.</p>
           <div id="portalClienteStatus"></div>
+        </div>
+      </div>
+
         </div>
       </div>
     </section>
