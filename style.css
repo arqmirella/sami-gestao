@@ -319,3 +319,11 @@
     .pd-nav-group:first-of-type{margin-top:6px;}
     .pd-content{flex:1;min-width:0;}
   }
+
+  /* Avaliação de fornecedores (estrelas) */
+  .estrelas-picker{display:flex;gap:4px;margin-bottom:6px;}
+  .estrela-btn{font-size:19px;line-height:1;background:none;border:none;cursor:pointer;color:var(--line);padding:2px;}
+  .estrela-btn.ativa{color:var(--terracotta);}
+  .estrelas-display{display:flex;gap:2px;margin-top:6px;}
+  .estrelas-display span{font-size:14px;line-height:1;color:var(--line);}
+  .estrelas-display span.ativa{color:var(--terracotta);}

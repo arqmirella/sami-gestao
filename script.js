@@ -599,6 +599,8 @@ function trocarAbaProjeto(tab){
   document.querySelectorAll('.pd-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'pdtab-'+tab));
   document.querySelectorAll('.pd-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
   if(tab==='anexos') loadAnexos();
+  if(tab==='orcamentos') loadOrcamentosProjeto();
+  if(tab==='atas') loadAtas();
   if(tab==='checklist') loadChecklistRevisao();
   if(tab==='aprovacoes') loadAprovacoes();
 }
@@ -738,32 +740,49 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
       </div>`;
     }).join('');
 
-  /* ---- Tarefas ---- */
+  /* ---- Tarefas (agrupadas por etapa + ambiente, pra não repetir um monte de itens soltos) ---- */
+  const gruposTarefas = new Map();
+  tarefas.forEach(t => {
+    const chave = `${t.etapa_id||'_'}|${t.ambiente_id||'_'}`;
+    if(!gruposTarefas.has(chave)) gruposTarefas.set(chave, []);
+    gruposTarefas.get(chave).push(t);
+  });
+
   document.getElementById('listaTarefasProjeto').innerHTML = (tarefas||[]).length===0
     ? '<p class="muted">Nenhuma tarefa ainda.</p>'
-    : tarefas.map(t => {
-      const resp = respPorTarefa.get(t.id) || [];
-      const nomeEtapa = t.etapa_id ? etapaNomeMap.get(t.etapa_id) : null;
-      return `<div class="task-card">
-        <div style="display:flex;justify-content:space-between;gap:8px;">
-          <p class="task-title">${esc(t.titulo)}</p>
-          <div style="display:flex;gap:8px;flex-shrink:0;">
-            <button class="edit-link" onclick="abrirModalEditarTarefa('${t.id}')">editar</button>
-            <button class="remove-link" onclick="excluirTarefaProjeto('${t.id}')">remover</button>
-          </div>
+    : `<div class="checklist-grid">${Array.from(gruposTarefas.entries()).map(([chave, itens]) => {
+      const [etapaId, ambienteId] = chave.split('|');
+      const nomeEtapa = etapaId!=='_' ? etapaNomeMap.get(etapaId) : null;
+      const nomeAmbiente = itens[0].ambientes?.nome || null;
+      const tituloGrupo = [nomeEtapa, nomeAmbiente].filter(Boolean).join(' — ') || 'Sem etapa / ambiente';
+      const concluidas = itens.filter(t => t.status==='concluida').length;
+      return `<details class="checklist-ambiente" ${itens.length<=1?'open':''}>
+        <summary class="checklist-ambiente-titulo">
+          <span>${esc(tituloGrupo)}</span>
+          <span class="checklist-ambiente-count ${concluidas===itens.length?'completo':''}">${concluidas}/${itens.length}</span>
+        </summary>
+        <div class="checklist-ambiente-corpo">
+          ${itens.map(t => {
+            const resp = respPorTarefa.get(t.id) || [];
+            return `<div class="task-card" style="box-shadow:none;">
+              <div style="display:flex;justify-content:space-between;gap:8px;">
+                <p class="task-title">${esc(t.titulo)}</p>
+                <div style="display:flex;gap:8px;flex-shrink:0;">
+                  <button class="edit-link" onclick="abrirModalEditarTarefa('${t.id}')">editar</button>
+                  <button class="remove-link" onclick="excluirTarefaProjeto('${t.id}')">remover</button>
+                </div>
+              </div>
+              ${resp.length ? `<div style="margin:6px 0;">${resp.map(n=>`<span class="badge line">${esc(n)}</span>`).join('')}</div>` : ''}
+              <div class="move-row" style="margin-top:8px;">
+                <button onclick="moverTarefaProjeto('${t.id}','pendente')" style="${t.status==='pendente'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Pendente</button>
+                <button onclick="moverTarefaProjeto('${t.id}','em_andamento')" style="${t.status==='em_andamento'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Andamento</button>
+                <button onclick="moverTarefaProjeto('${t.id}','concluida')" style="${t.status==='concluida'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Concluída</button>
+              </div>
+            </div>`;
+          }).join('')}
         </div>
-        <div style="margin:6px 0;">
-          ${nomeEtapa ? `<span class="badge line">${esc(nomeEtapa)}</span>` : ''}
-          ${t.ambientes?.nome ? `<span class="badge clay">${esc(t.ambientes.nome)}</span>` : ''}
-          ${resp.map(n=>`<span class="badge line">${esc(n)}</span>`).join('')}
-        </div>
-        <div class="move-row" style="margin-top:8px;">
-          <button onclick="moverTarefaProjeto('${t.id}','pendente')" style="${t.status==='pendente'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Pendente</button>
-          <button onclick="moverTarefaProjeto('${t.id}','em_andamento')" style="${t.status==='em_andamento'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Andamento</button>
-          <button onclick="moverTarefaProjeto('${t.id}','concluida')" style="${t.status==='concluida'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Concluída</button>
-        </div>
-      </div>`;
-    }).join('');
+      </details>`;
+    }).join('')}</div>`;
 
   /* ---- Financeiro ---- */
   const total = (parcelas||[]).reduce((s,p) => s + Number(p.valor), 0);
@@ -1237,11 +1256,13 @@ async function loadTarefas(){
     `<button type="button" class="chip" data-id="${m.id}" onclick="this.classList.toggle('on')">${esc(m.nome)}</button>`
   ).join('');
 
-  const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }] = await Promise.all([
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,ambiente_id,projetos(nome),ambientes(nome)').order('criado_em',{ascending:false}),
+  const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }, { data: todasEtapas }] = await Promise.all([
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,etapa_id,ambiente_id,projetos(nome),ambientes(nome)').order('criado_em',{ascending:false}),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id,equipe(nome)'),
     sb.from('tarefas_tempo').select('id,tarefa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
+    sb.from('etapas').select('id,nome'),
   ]);
+  window._etapaNomeGlobalMap = new Map((todasEtapas||[]).map(e => [e.id, e.nome]));
 
   const respPorTarefa = new Map();
   (responsaveis||[]).forEach(r => {
@@ -1404,21 +1425,51 @@ function renderListaFlatTarefas(){
 
   if(tarefasVisiveis.length===0){ cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhuma tarefa nesse filtro.</p>'; return; }
 
-  cont.innerHTML = `
+  const linhaTarefa = (t) => {
+    const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
+    const resp = (respPorTarefa.get(t.id) || []).join(', ');
+    return `<div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:12px;padding:11px 18px;align-items:center;border-bottom:1px solid var(--line);font-size:13.5px;">
+      <div><p style="margin:0;">${esc(t.titulo)}</p><p style="margin:2px 0 0;font-size:12.5px;color:var(--graphite);">${esc(t.projetos?.nome||'')}${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p></div>
+      <span style="font-size:12px;color:var(--graphite);">${esc(resp)||'—'}</span>
+      <span style="font-size:12px;color:${atrasada?'var(--alert)':'var(--graphite)'};white-space:nowrap;">${t.prazo?fmtDataBR(t.prazo):'—'}</span>
+      <span class="pill" style="color:${atrasada?'var(--alert)':STATUS_PILL_COR[t.status]};border-color:${atrasada?'var(--alert)':STATUS_PILL_COR[t.status]};white-space:nowrap;">${atrasada?'Atrasada':STATUS_TAREFA_LABEL[t.status]}</span>
+      <button class="edit-link" onclick="abrirModalEditarTarefa('${t.id}')">editar</button>
+    </div>`;
+  };
+
+  const comAmbiente = tarefasVisiveis.filter(t => t.ambiente_id);
+  const semAmbiente = tarefasVisiveis.filter(t => !t.ambiente_id);
+
+  const grupos = new Map();
+  comAmbiente.forEach(t => {
+    const chave = `${t.projeto_id}|${t.etapa_id||'_'}|${t.ambiente_id}`;
+    if(!grupos.has(chave)) grupos.set(chave, []);
+    grupos.get(chave).push(t);
+  });
+
+  const cabecalho = `
     <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:12px;padding:10px 18px;font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;color:var(--graphite);border-bottom:1px solid var(--line);">
       <span>Tarefa / Projeto</span><span>Responsáveis</span><span>Prazo</span><span>Status</span><span></span>
-    </div>
-    ${tarefasVisiveis.map(t => {
-      const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
-      const resp = (respPorTarefa.get(t.id) || []).join(', ');
-      return `<div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:12px;padding:11px 18px;align-items:center;border-bottom:1px solid var(--line);font-size:13.5px;">
-        <div><p style="margin:0;">${esc(t.titulo)}</p><p style="margin:2px 0 0;font-size:12.5px;color:var(--graphite);">${esc(t.projetos?.nome||'')}${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p></div>
-        <span style="font-size:12px;color:var(--graphite);">${esc(resp)||'—'}</span>
-        <span style="font-size:12px;color:${atrasada?'var(--alert)':'var(--graphite)'};white-space:nowrap;">${t.prazo?fmtDataBR(t.prazo):'—'}</span>
-        <span class="pill" style="color:${atrasada?'var(--alert)':STATUS_PILL_COR[t.status]};border-color:${atrasada?'var(--alert)':STATUS_PILL_COR[t.status]};white-space:nowrap;">${atrasada?'Atrasada':STATUS_TAREFA_LABEL[t.status]}</span>
-        <button class="edit-link" onclick="abrirModalEditarTarefa('${t.id}')">editar</button>
-      </div>`;
-    }).join('')}
+    </div>`;
+
+  const gruposHtml = Array.from(grupos.entries()).map(([, itens]) => {
+    const nomeProjeto = itens[0].projetos?.nome || '';
+    const nomeEtapa = itens[0].etapa_id ? (window._etapaNomeGlobalMap?.get(itens[0].etapa_id) || '') : '';
+    const nomeAmbiente = itens[0].ambientes?.nome || '';
+    const concluidas = itens.filter(t => t.status==='concluida').length;
+    const tituloGrupo = [nomeProjeto, nomeEtapa, nomeAmbiente].filter(Boolean).join(' · ');
+    return `<details class="checklist-ambiente" style="margin-bottom:8px;">
+      <summary class="checklist-ambiente-titulo">
+        <span>${esc(tituloGrupo)}</span>
+        <span class="checklist-ambiente-count ${concluidas===itens.length?'completo':''}">${concluidas}/${itens.length}</span>
+      </summary>
+      <div class="checklist-ambiente-corpo" style="padding:0;">${itens.map(linhaTarefa).join('')}</div>
+    </details>`;
+  }).join('');
+
+  cont.innerHTML = `
+    ${gruposHtml ? `<div style="margin-bottom:14px;">${gruposHtml}</div>` : ''}
+    ${semAmbiente.length>0 ? cabecalho + semAmbiente.map(linhaTarefa).join('') : ''}
   `;
 }
 
@@ -1635,8 +1686,9 @@ async function excluirParcelaGlobal(id){ await sb.from('financeiro_parcelas').de
 
 /* ================= FORNECEDORES ================= */
 async function loadFornecedores(){
-  const { data: fornecedores } = await sb.from('fornecedores').select('id,nome,categoria,contato,telefone,email').order('nome');
+  const { data: fornecedores } = await sb.from('fornecedores').select('id,nome,categoria,contato,telefone,email,avaliacao').order('nome');
   window._fornecedores = fornecedores || [];
+  renderEstrelasPicker('fnEstrelas', 'fnAvaliacao', 0);
   const cont = document.getElementById('gridFornecedores');
   cont.innerHTML = window._fornecedores.length===0
     ? '<p class="muted">Nenhum fornecedor cadastrado ainda.</p>'
@@ -1650,20 +1702,47 @@ async function loadFornecedores(){
         ${f.contato ? `<p style="font-size:13px;color:var(--graphite);margin:2px 0;">${esc(f.contato)}</p>` : ''}
         ${f.telefone ? `<p style="font-size:13px;color:var(--graphite);margin:2px 0;">${esc(f.telefone)}</p>` : ''}
         ${f.email ? `<p style="font-size:13px;color:var(--graphite);margin:2px 0;">${esc(f.email)}</p>` : ''}
+        <div class="estrelas-picker" style="margin-top:8px;margin-bottom:0;">
+          ${[1,2,3,4,5].map(n => `<button type="button" class="estrela-btn ${n<=(f.avaliacao||0)?'ativa':''}" onclick="avaliarFornecedor('${f.id}',${n})">★</button>`).join('')}
+        </div>
       </div>`).join('');
 }
+
+/* Monta um seletor de estrelas clicável (usado no formulário de novo fornecedor) */
+function renderEstrelasPicker(idContainer, idInputOculto, valorAtual){
+  const cont = document.getElementById(idContainer);
+  if(!cont) return;
+  cont.innerHTML = [1,2,3,4,5].map(n => `<button type="button" class="estrela-btn ${n<=valorAtual?'ativa':''}" onclick="selecionarEstrela('${idContainer}','${idInputOculto}',${n})">★</button>`).join('');
+  document.getElementById(idInputOculto).value = valorAtual || '';
+}
+function selecionarEstrela(idContainer, idInputOculto, valor){
+  const atual = Number(document.getElementById(idInputOculto).value || 0);
+  const novoValor = atual===valor ? 0 : valor; // clicar na mesma estrela de novo zera
+  renderEstrelasPicker(idContainer, idInputOculto, novoValor);
+}
+async function avaliarFornecedor(id, valor){
+  const fornecedor = (window._fornecedores||[]).find(f => f.id===id);
+  const novoValor = fornecedor && fornecedor.avaliacao===valor ? null : valor;
+  await sb.from('fornecedores').update({ avaliacao: novoValor }).eq('id', id);
+  loadFornecedores();
+}
+
 async function criarFornecedor(e){
   e.preventDefault();
   const nome = document.getElementById('fnNome').value.trim();
   if(!nome) return;
-  await sb.from('fornecedores').insert({
+  const avaliacao = document.getElementById('fnAvaliacao').value;
+  const resultado = await sb.from('fornecedores').insert({
     nome,
     categoria: document.getElementById('fnCategoria').value.trim() || null,
     contato: document.getElementById('fnContato').value.trim() || null,
     telefone: document.getElementById('fnTelefone').value.trim() || null,
     email: document.getElementById('fnEmail').value.trim() || null,
+    avaliacao: avaliacao ? Number(avaliacao) : null,
   });
+  if(checarErro(resultado, 'cadastrar fornecedor')) return;
   e.target.reset();
+  renderEstrelasPicker('fnEstrelas', 'fnAvaliacao', 0);
   toggleForm('formFornecedor', false);
   loadFornecedores();
 }
@@ -3036,4 +3115,159 @@ async function marcarAprovacaoManual(id){
 async function excluirAprovacao(id){
   await sb.from('aprovacoes_cliente').delete().eq('id', id);
   loadAprovacoes();
+}
+
+/* ================= ORÇAMENTOS (dentro do projeto) ================= */
+const STATUS_ORC_LABEL_PD = { aberto:'Em análise', aprovado:'Aprovado', recusado:'Recusado' };
+const STATUS_ORC_COR_PD = { aberto:'var(--clay)', aprovado:'var(--sage)', recusado:'var(--alert)' };
+
+async function uploadArquivoOrcamento(file){
+  const ext = file.name.split('.').pop();
+  const nomeArquivo = `orc-${crypto.randomUUID ? crypto.randomUUID() : Date.now()}.${ext}`;
+  const { error } = await sb.storage.from('anexos').upload(nomeArquivo, file);
+  if(error){ alert('Não consegui enviar o PDF: ' + error.message); return null; }
+  const { data } = sb.storage.from('anexos').getPublicUrl(nomeArquivo);
+  return data?.publicUrl || null;
+}
+
+async function loadOrcamentosProjeto(){
+  const [{ data: orcamentos }, { data: fornecedores }] = await Promise.all([
+    sb.from('orcamentos').select('id,descricao,valor,status,arquivo_url,nome_arquivo,fornecedor_id,fornecedores(nome)').eq('projeto_id', projetoAtualId).order('criado_em',{ascending:false}),
+    sb.from('fornecedores').select('id,nome').order('nome'),
+  ]);
+
+  document.getElementById('poFornecedor').innerHTML = '<option value="">Sem fornecedor vinculado</option>' +
+    (fornecedores||[]).map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('');
+
+  let aberto = 0, aprovado = 0;
+  (orcamentos||[]).forEach(o => { if(o.status==='aberto') aberto += Number(o.valor); if(o.status==='aprovado') aprovado += Number(o.valor); });
+  document.getElementById('pdOrcAberto').textContent = fmtMoeda(aberto);
+  document.getElementById('pdOrcAberto').style.color = STATUS_ORC_COR_PD.aberto;
+  document.getElementById('pdOrcAprovado').textContent = fmtMoeda(aprovado);
+  document.getElementById('pdOrcAprovado').style.color = STATUS_ORC_COR_PD.aprovado;
+
+  document.getElementById('listaOrcamentosProjeto').innerHTML = (orcamentos||[]).length===0
+    ? '<p class="muted">Nenhum orçamento lançado ainda.</p>'
+    : orcamentos.map(o => `
+      <div class="task-card">
+        <div style="display:flex;justify-content:space-between;gap:8px;">
+          <div>
+            <p style="font-size:14px;font-weight:500;margin:0;">${esc(o.descricao||'Orçamento')}</p>
+            <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${esc(o.fornecedores?.nome||'')}${o.fornecedores?.nome?' · ':''}${fmtMoeda(o.valor)}</p>
+          </div>
+          <button class="remove-link" onclick="excluirOrcamentoProjeto('${o.id}')">remover</button>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+          <select onchange="atualizarStatusOrcamentoProjeto('${o.id}', this.value)" style="font-size:12px;border:1px solid ${STATUS_ORC_COR_PD[o.status]};color:${STATUS_ORC_COR_PD[o.status]};border-radius:8px;padding:5px 8px;">
+            ${Object.entries(STATUS_ORC_LABEL_PD).map(([v,l]) => `<option value="${v}" ${v===o.status?'selected':''}>${l}</option>`).join('')}
+          </select>
+          ${o.arquivo_url ? `<a href="${esc(o.arquivo_url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--terracotta);">${esc(o.nome_arquivo||'ver PDF')}</a>` : ''}
+        </div>
+      </div>`).join('');
+}
+
+async function criarOrcamentoProjeto(e){
+  e.preventDefault();
+  const valor = document.getElementById('poValor').value;
+  if(!valor) return;
+
+  const arquivo = document.getElementById('poArquivo').files[0];
+  let arquivoUrl = null, nomeArquivo = null;
+  if(arquivo){
+    arquivoUrl = await uploadArquivoOrcamento(arquivo);
+    nomeArquivo = arquivo.name;
+  }
+
+  const resultado = await sb.from('orcamentos').insert({
+    projeto_id: projetoAtualId,
+    fornecedor_id: document.getElementById('poFornecedor').value || null,
+    descricao: document.getElementById('poDescricao').value.trim() || null,
+    valor: parseValorBR(valor),
+    arquivo_url: arquivoUrl,
+    nome_arquivo: nomeArquivo,
+  });
+  if(checarErro(resultado, 'criar orçamento')) return;
+  e.target.reset();
+  toggleForm('formOrcamentoProjeto', false);
+  loadOrcamentosProjeto();
+}
+
+async function atualizarStatusOrcamentoProjeto(id, status){
+  await sb.from('orcamentos').update({ status }).eq('id', id);
+  loadOrcamentosProjeto();
+}
+async function excluirOrcamentoProjeto(id){
+  await sb.from('orcamentos').delete().eq('id', id);
+  loadOrcamentosProjeto();
+}
+
+/* ================= ATAS DE REUNIÃO ================= */
+async function loadAtas(){
+  const { data: atas } = await sb.from('atas_reuniao').select('*').eq('projeto_id', projetoAtualId).order('data', { ascending: false });
+  window._atasProjeto = atas || [];
+
+  document.getElementById('listaAtas').innerHTML = (atas||[]).length===0
+    ? '<p class="muted">Nenhuma ata registrada ainda.</p>'
+    : atas.map(a => `
+      <div class="task-card" style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <p style="font-size:14px;font-weight:500;margin:0;">Reunião · ${fmtDataBR(a.data)}</p>
+          ${a.participantes ? `<p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${esc(a.participantes)}</p>` : ''}
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="abrirAta('${a.id}')">ver / imprimir</button>
+          <button class="remove-link" onclick="excluirAta('${a.id}')">remover</button>
+        </div>
+      </div>`).join('');
+}
+
+async function criarAta(e){
+  e.preventDefault();
+  const data = document.getElementById('ataData').value;
+  if(!data) return;
+  const resultado = await sb.from('atas_reuniao').insert({
+    projeto_id: projetoAtualId,
+    data,
+    participantes: document.getElementById('ataParticipantes').value.trim() || null,
+    decisoes: document.getElementById('ataDecisoes').value.trim() || null,
+    pendencias: document.getElementById('ataPendencias').value.trim() || null,
+    responsaveis: document.getElementById('ataResponsaveis').value.trim() || null,
+  });
+  if(checarErro(resultado, 'salvar ata')) return;
+  e.target.reset();
+  toggleForm('formNovaAta', false);
+  loadAtas();
+}
+
+async function excluirAta(id){
+  await sb.from('atas_reuniao').delete().eq('id', id);
+  loadAtas();
+}
+
+function abrirAta(id){
+  const a = (window._atasProjeto||[]).find(x => x.id===id);
+  if(!a || !dadosProjetoAtual) return;
+  const janela = window.open('', '_blank');
+  janela.document.write(`
+    <html><head><title>Ata de Reunião — ${esc(dadosProjetoAtual.nome)}</title>
+    <style>body{font-family:Georgia,serif;max-width:680px;margin:50px auto;color:#211C18;line-height:1.6;padding:0 20px;}
+    h1{font-size:21px;margin-bottom:4px;}h2{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:#5C554C;margin-top:28px;border-bottom:1px solid #E3DACD;padding-bottom:6px;}
+    p{font-size:14px;white-space:pre-wrap;}</style>
+    </head><body>
+    <h1>Ata de Reunião</h1>
+    <p style="color:#5C554C;">${esc(dadosProjetoAtual.nome)} · ${fmtDataBR(a.data)}</p>
+
+    <h2>Participantes</h2>
+    <p>${esc(a.participantes || '—')}</p>
+
+    <h2>Decisões tomadas</h2>
+    <p>${esc(a.decisoes || '—')}</p>
+
+    <h2>Pendências</h2>
+    <p>${esc(a.pendencias || '—')}</p>
+
+    <h2>Responsáveis</h2>
+    <p>${esc(a.responsaveis || '—')}</p>
+    </body></html>`);
+  janela.document.close();
 }

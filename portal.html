@@ -49,6 +49,13 @@
   .aprov-comentario-box textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px;font-family:inherit;margin-bottom:8px;}
   .aprov-status-pill{font-size:12px;padding:3px 10px;border-radius:99px;display:inline-block;}
   .aprov-comentario-lido{background:var(--paper);border-radius:9px;padding:8px 10px;margin-top:8px;font-size:12.5px;}
+  .fin-resumo{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;}
+  .fin-resumo div{background:var(--paper);border-radius:9px;padding:10px;text-align:center;}
+  .fin-resumo p:first-child{font-size:10.5px;text-transform:uppercase;color:var(--graphite);margin:0 0 4px;font-family:'IBM Plex Mono',monospace;}
+  .fin-resumo p:last-child{font-size:14px;font-weight:600;margin:0;}
+  .parcela-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--paper);font-size:13px;}
+  .parcela-row:last-child{border-bottom:none;}
+  .parcela-status{font-size:11px;padding:3px 9px;border-radius:99px;}
 
   /* Lista "Entregas" (miniatura + status + expandir) */
   .entrega-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--paper);cursor:pointer;}
@@ -76,6 +83,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_-hD_wTqLCMlLQct3DBTFZw_UvIvLHap";
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtData(d){ return new Date(d+'T00:00:00').toLocaleDateString('pt-BR'); }
+function fmtMoeda(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
 function fmtDataHora(iso){
   const d = new Date(iso);
   return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
@@ -122,6 +130,29 @@ async function carregarERenderizar(){
       <div class="bar"><div style="width:${p.percentual_execucao}%"></div></div>
       ${p.data_prevista ? `<p style="font-size:12.5px;color:var(--graphite);margin:10px 0 0;">Previsão de entrega: ${fmtData(p.data_prevista)}</p>` : ''}
     </div>
+
+    ${p.financeiro && (p.financeiro.parcelas||[]).length > 0 ? `
+    <div class="card">
+      <p class="label" style="margin-bottom:10px;">Financeiro</p>
+      <div class="fin-resumo">
+        <div><p>Total</p><p>${fmtMoeda(p.financeiro.total)}</p></div>
+        <div><p>Pago</p><p style="color:#5C6E5A;">${fmtMoeda(p.financeiro.pago)}</p></div>
+        <div><p>A pagar</p><p style="color:#C1602E;">${fmtMoeda(p.financeiro.pendente)}</p></div>
+      </div>
+      ${p.financeiro.parcelas.map(pc => {
+        const hoje = new Date(); hoje.setHours(0,0,0,0);
+        const atrasada = pc.status!=='pago' && pc.vencimento && new Date(pc.vencimento+'T00:00:00') < hoje;
+        const cor = pc.status==='pago' ? '#5C6E5A' : atrasada ? '#8B3A2B' : '#C1602E';
+        const texto = pc.status==='pago' ? 'Pago' : atrasada ? 'Atrasado' : 'Pendente';
+        return `<div class="parcela-row">
+          <span>${esc(pc.descricao||'Parcela')} <span style="color:var(--graphite);">· ${fmtData(pc.vencimento)}</span></span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <b>${fmtMoeda(pc.valor)}</b>
+            <span class="parcela-status" style="color:${cor};background:${cor}22;">${texto}</span>
+          </span>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
 
     <div class="card">
       <p class="label" style="margin-bottom:14px;">Etapas do projeto</p>

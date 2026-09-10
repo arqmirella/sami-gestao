@@ -311,9 +311,15 @@
           <button type="button" class="pd-tab" data-tab="etapas" onclick="trocarAbaProjeto('etapas')">Etapas</button>
           <button type="button" class="pd-tab" data-tab="checklist" onclick="trocarAbaProjeto('checklist')">Checklist Executivo</button>
 
+          <p class="pd-nav-group">Financeiro</p>
+          <button type="button" class="pd-tab" data-tab="orcamentos" onclick="trocarAbaProjeto('orcamentos')">Orçamentos</button>
+
           <p class="pd-nav-group">Obra</p>
           <button type="button" class="pd-tab" data-tab="visitas" onclick="trocarAbaProjeto('visitas')">Visitas</button>
           <button type="button" class="pd-tab" data-tab="relatorios" onclick="trocarAbaProjeto('relatorios')">Relatórios de obra</button>
+
+          <p class="pd-nav-group">Reuniões</p>
+          <button type="button" class="pd-tab" data-tab="atas" onclick="trocarAbaProjeto('atas')">Atas de reunião</button>
 
           <p class="pd-nav-group">Cliente</p>
           <button type="button" class="pd-tab" data-tab="aprovacoes" onclick="trocarAbaProjeto('aprovacoes')">Aprovações do cliente</button>
@@ -447,6 +453,27 @@
         <div id="listaAnexos"></div>
       </div>
 
+      <!-- Sub-aba: Orçamentos do projeto -->
+      <div id="pdtab-orcamentos" class="pd-tabcontent hidden">
+        <div class="grid" style="grid-template-columns:repeat(2,1fr);max-width:420px;margin-bottom:16px;">
+          <div class="card"><p class="label">Em análise</p><p id="pdOrcAberto" style="font-size:19px;font-weight:600;"></p></div>
+          <div class="card"><p class="label">Aprovado</p><p id="pdOrcAprovado" style="font-size:19px;font-weight:600;"></p></div>
+        </div>
+        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formOrcamentoProjeto')">+ Novo orçamento</button>
+        <form id="formOrcamentoProjeto" class="form-box hidden" onsubmit="criarOrcamentoProjeto(event)">
+          <select id="poFornecedor"><option value="">Sem fornecedor vinculado</option></select>
+          <input id="poDescricao" placeholder="Descrição (ex: Marcenaria sob medida)" />
+          <input id="poValor" required placeholder="Valor" />
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">PDF do fornecedor (opcional)</label>
+          <input id="poArquivo" type="file" accept="application/pdf,image/*" style="margin-bottom:10px;" />
+          <div class="form-actions">
+            <button type="submit" class="btn">Salvar orçamento</button>
+            <button type="button" class="btn-ghost" onclick="toggleForm('formOrcamentoProjeto', false)">Cancelar</button>
+          </div>
+        </form>
+        <div id="listaOrcamentosProjeto"></div>
+      </div>
+
       <!-- Sub-aba: Visitas -->
       <div id="pdtab-visitas" class="pd-tabcontent hidden">
         <form onsubmit="adicionarVisita(event)" class="form-box" style="max-width:560px;">
@@ -483,7 +510,23 @@
         <div id="listaRelatorios"></div>
       </div>
 
-      <!-- Sub-aba: Dados da obra -->
+      <!-- Sub-aba: Atas de reunião -->
+      <div id="pdtab-atas" class="pd-tabcontent hidden">
+        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaAta')">+ Nova ata</button>
+        <form id="formNovaAta" class="form-box hidden" style="max-width:600px;" onsubmit="criarAta(event)">
+          <input id="ataData" type="date" required style="margin-bottom:10px;" />
+          <input id="ataParticipantes" placeholder="Participantes" />
+          <textarea id="ataDecisoes" placeholder="Decisões tomadas" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
+          <textarea id="ataPendencias" placeholder="Pendências" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
+          <input id="ataResponsaveis" placeholder="Responsáveis por cada pendência (opcional)" style="margin-bottom:10px;" />
+          <div class="form-actions">
+            <button type="submit" class="btn">Salvar ata</button>
+            <button type="button" class="btn-ghost" onclick="toggleForm('formNovaAta', false)">Cancelar</button>
+          </div>
+        </form>
+        <div id="listaAtas"></div>
+      </div>
+
       <!-- Sub-aba: Checklist Executivo -->
       <div id="pdtab-checklist" class="pd-tabcontent hidden">
         <div id="checklistRevisaoConteudo"></div>
@@ -491,7 +534,13 @@
 
       <!-- Sub-aba: Aprovações do cliente -->
       <div id="pdtab-aprovacoes" class="pd-tabcontent hidden">
-        <p class="muted" style="max-width:600px;">Peça o aceite do cliente pra briefing, estudo preliminar, executivo ou imagens 3D — ele responde direto pelo link dele (a mesma tela de acompanhamento), aprovando ou pedindo ajuste com um comentário. Precisa gerar o link do portal primeiro, na aba "Dados da obra".</p>
+        <div class="card" style="max-width:560px;margin-bottom:20px;">
+          <p class="label">Portal do cliente</p>
+          <p class="muted" style="margin-top:0;">Uma tela simples e só-leitura pra esse cliente acompanhar o progresso e responder as aprovações abaixo, sem precisar de login.</p>
+          <div id="portalClienteStatus"></div>
+        </div>
+
+        <p class="muted" style="max-width:600px;">Peça o aceite do cliente pra briefing, estudo preliminar, executivo ou imagens 3D — ele responde direto pelo link dele acima, aprovando ou pedindo ajuste com um comentário.</p>
         <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaAprovacao')">+ Pedir aprovação</button>
         <form id="formNovaAprovacao" class="form-box hidden" onsubmit="criarAprovacao(event)">
           <select id="apTipo" onchange="ajustarTituloAprovacao()">
@@ -535,12 +584,6 @@
 
           <button class="btn">Salvar dados</button>
         </form>
-
-        <div class="card" style="max-width:560px;margin-top:20px;">
-          <p class="label">Portal do cliente</p>
-          <p class="muted" style="margin-top:0;">Uma tela simples e só-leitura pra esse cliente acompanhar o progresso, sem precisar de login.</p>
-          <div id="portalClienteStatus"></div>
-        </div>
       </div>
 
         </div>
@@ -776,6 +819,9 @@
           <input id="fnTelefone" placeholder="Telefone" style="flex:1;" />
           <input id="fnEmail" placeholder="E-mail" style="flex:1;" />
         </div>
+        <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);display:block;margin:10px 0 4px;">Avaliação (opcional)</label>
+        <div id="fnEstrelas" class="estrelas-picker"></div>
+        <input type="hidden" id="fnAvaliacao" value="" />
         <div class="form-actions" style="margin-top:10px;">
           <button type="submit" class="btn">Salvar</button>
           <button type="button" class="btn-ghost" onclick="toggleForm('formFornecedor', false)">Cancelar</button>
