@@ -73,7 +73,10 @@
 
   /* Kanban */
   .kanban{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
-  .kanban-col{background:rgba(227,218,205,.35);border-radius:16px;padding:16px;}
+  .kanban-col{background:rgba(227,218,205,.35);border-radius:16px;padding:16px;transition:background .12s;}
+  .kanban-col.drag-over{background:rgba(193,96,46,.15);outline:2px dashed var(--terracotta);outline-offset:-2px;}
+  .task-card[draggable="true"]{cursor:grab;}
+  .task-card.dragging{opacity:.4;cursor:grabbing;}
   .col-header{display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:0 4px;}
   .col-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
   .col-dot.pendente{background:var(--clay);}

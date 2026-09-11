@@ -619,7 +619,7 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
   ] = await Promise.all([
     sb.from('projetos').select('*, clientes(nome_completo)').eq('id', projetoId).single(),
     sb.from('etapas').select('*').eq('projeto_id', projetoId).order('ordem'),
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,etapa_id,ambiente_id,ambientes(nome)').eq('projeto_id', projetoId).order('criado_em',{ascending:false}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,etapa_id,ambiente_id,ambientes(nome)').eq('projeto_id', projetoId).order('criado_em',{ascending:true}),
     sb.from('financeiro_parcelas').select('id,descricao,valor,vencimento,status').eq('projeto_id', projetoId).order('vencimento'),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe(nome)'),
     sb.from('equipe').select('id,nome').eq('ativo', true).order('nome'),
@@ -1257,7 +1257,7 @@ async function loadTarefas(){
   ).join('');
 
   const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }, { data: todasEtapas }] = await Promise.all([
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,etapa_id,ambiente_id,projetos(nome),ambientes(nome)').order('criado_em',{ascending:false}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,etapa_id,ambiente_id,projetos(nome),ambientes(nome)').order('criado_em',{ascending:true}),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id,equipe(nome)'),
     sb.from('tarefas_tempo').select('id,tarefa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
     sb.from('etapas').select('id,nome'),
@@ -1360,7 +1360,7 @@ function renderKanbanTarefas(){
 
   document.getElementById('kanbanTarefas').innerHTML = STATUS_TAREFA.map(col => {
     const itens = tarefasVisiveis.filter(t => t.status===col.status);
-    return `<div class="kanban-col">
+    return `<div class="kanban-col" ondragover="dragOverColuna(event,this)" ondragleave="this.classList.remove('drag-over')" ondrop="dropColuna(event,'${col.status}',this)">
       <div class="col-header">
         <span class="col-dot ${DOT_CLASS[col.status]}"></span>
         <p class="col-label">${col.label}</p>
@@ -1371,7 +1371,7 @@ function renderKanbanTarefas(){
         const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
         const resp = respPorTarefa.get(t.id) || [];
         const tempoAberto = tempoAbertoPorTarefa.get(t.id);
-        return `<div class="task-card${atrasada?' atrasada':''}">
+        return `<div class="task-card${atrasada?' atrasada':''}" draggable="true" ondragstart="dragStartTarefa(event,'${t.id}')" ondragend="dragEndTarefa(event)">
           <p class="label" style="margin-bottom:2px;">${esc(t.projetos?.nome||'')}${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p>
           <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;">
             <p class="task-title">${esc(t.titulo)}</p>
@@ -1403,6 +1403,7 @@ function renderKanbanTarefas(){
                   <button class="timer-go" onclick="iniciarCronometro('${t.id}')">▶ Iniciar</button>
                 </div>
               </div>`}
+          <button class="btn-ghost" style="font-size:11.5px;padding:0;margin-bottom:8px;" onclick="abrirModalEditarTarefa('${t.id}')">ver tempo registrado</button>
           <div class="move-row">
             ${STATUS_TAREFA.filter(c=>c.status!==col.status).map(c => `<button onclick="moverTarefaKanban('${t.id}','${c.status}')">→ ${c.label}</button>`).join('')}
           </div>
@@ -1410,6 +1411,29 @@ function renderKanbanTarefas(){
       }).join('')}
     </div>`;
   }).join('');
+}
+
+/* Arrastar e soltar no kanban (computador; no celular use os botões "→") */
+let _tarefaArrastadaId = null;
+function dragStartTarefa(e, id){
+  _tarefaArrastadaId = id;
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+function dragEndTarefa(e){
+  e.currentTarget.classList.remove('dragging');
+}
+function dragOverColuna(e, col){
+  e.preventDefault();
+  col.classList.add('drag-over');
+}
+async function dropColuna(e, status, col){
+  e.preventDefault();
+  col.classList.remove('drag-over');
+  if(!_tarefaArrastadaId) return;
+  const id = _tarefaArrastadaId;
+  _tarefaArrastadaId = null;
+  await moverTarefaKanban(id, status);
 }
 
 const STATUS_PILL_COR = { pendente:'var(--clay)', em_andamento:'var(--terracotta)', concluida:'var(--sage)' };
@@ -2571,14 +2595,16 @@ function recarregarAposEdicao(){
 
 /* ---- Editar tarefa ---- */
 async function abrirModalEditarTarefa(tarefaId){
-  const [{ data: tarefa }, { data: comentarios }] = await Promise.all([
+  const [{ data: tarefa }, { data: comentarios }, { data: registrosTempo }] = await Promise.all([
     sb.from('tarefas').select('*').eq('id', tarefaId).single(),
     sb.from('tarefa_comentarios').select('*').eq('tarefa_id', tarefaId).order('criado_em', { ascending: true }),
+    sb.from('tarefas_tempo').select('id,inicio,fim,duracao_segundos,equipe(nome)').eq('tarefa_id', tarefaId).order('inicio', { ascending: false }),
   ]);
   if(!tarefa) return;
 
   const { data: ambientesProjeto } = await sb.from('ambientes').select('id,nome').eq('projeto_id', tarefa.projeto_id);
   const nomeSalvoComentario = localStorage.getItem('sami_nome_recado') || '';
+  const totalSegundos = (registrosTempo||[]).reduce((soma, r) => soma + (r.duracao_segundos || 0), 0);
 
   abrirModal(`
     <p class="label" style="margin-bottom:14px;">Editar tarefa</p>
@@ -2599,6 +2625,22 @@ async function abrirModalEditarTarefa(tarefaId){
         <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
       </div>
     </form>
+
+    <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <p class="label" style="margin:0;">Tempo registrado</p>
+        <p class="mono" style="font-size:13px;font-weight:600;color:var(--terracotta);margin:0;">${fmtHoras(totalSegundos)}</p>
+      </div>
+      <div style="max-height:160px;overflow-y:auto;">
+        ${(registrosTempo||[]).length===0
+          ? '<p class="muted" style="font-size:12.5px;">Nenhum registro de cronômetro ainda.</p>'
+          : registrosTempo.map(r => `
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--paper);">
+              <span>${esc(r.equipe?.nome||'')} · ${new Date(r.inicio).toLocaleDateString('pt-BR')}</span>
+              <span style="color:var(--graphite);">${r.fim ? fmtHoras(r.duracao_segundos||0) : 'em andamento'}</span>
+            </div>`).join('')}
+      </div>
+    </div>
 
     <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;">
       <p class="label" style="margin-bottom:10px;">Comentários</p>
