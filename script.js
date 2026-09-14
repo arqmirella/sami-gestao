@@ -601,6 +601,7 @@ function trocarAbaProjeto(tab){
   if(tab==='anexos') loadAnexos();
   if(tab==='orcamentos') loadOrcamentosProjeto();
   if(tab==='atas') loadAtas();
+  if(tab==='briefing') loadBriefing();
   if(tab==='checklist') loadChecklistRevisao();
   if(tab==='aprovacoes') loadAprovacoes();
 }
@@ -3074,7 +3075,7 @@ function ajustarTituloAprovacao(){
 
 async function loadAprovacoes(){
   const [{ data: aprovacoes }, { data: etapas }] = await Promise.all([
-    sb.from('aprovacoes_cliente').select('id,tipo,titulo,descricao,status,comentario_cliente,data_resposta,criado_em,visto_pela_equipe,etapa_id,etapas(nome),aprovacao_imagens(url)').eq('projeto_id', projetoAtualId).order('criado_em', { ascending: false }),
+    sb.from('aprovacoes_cliente').select('id,tipo,titulo,descricao,status,comentario_cliente,data_resposta,criado_em,visto_pela_equipe,etapa_id,eh_checklist,etapas(nome),aprovacao_imagens(url),aprovacao_checklist_itens(id,item,marcado)').eq('projeto_id', projetoAtualId).order('criado_em', { ascending: false }),
     sb.from('etapas').select('id,nome').eq('projeto_id', projetoAtualId),
   ]);
 
@@ -3092,11 +3093,15 @@ async function loadAprovacoes(){
     cont.innerHTML = '<p class="muted">Nenhuma aprovação pedida ainda.</p>';
     return;
   }
-  cont.innerHTML = aprovacoes.map(a => `
+  cont.innerHTML = aprovacoes.map(a => {
+    const itensChecklist = a.aprovacao_checklist_itens || [];
+    const marcados = itensChecklist.filter(i => i.marcado).length;
+    return `
     <div class="task-card">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
         <div>
           <span class="badge line">${TIPO_APROVACAO_LABEL[a.tipo]}</span>
+          ${a.eh_checklist ? '<span class="badge clay">Checklist</span>' : ''}
           ${a.etapas?.nome ? `<span class="badge line">${esc(a.etapas.nome)}</span>` : ''}
           <p style="font-size:14px;font-weight:500;margin:6px 0 0;">${esc(a.titulo)}</p>
         </div>
@@ -3104,12 +3109,23 @@ async function loadAprovacoes(){
       </div>
       ${a.descricao ? `<p style="font-size:12.5px;color:var(--graphite);margin:6px 0;">${esc(a.descricao)}</p>` : ''}
       ${(a.aprovacao_imagens||[]).length>0 ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;">${a.aprovacao_imagens.map(img => `<div class="proj-thumb" style="width:70px;height:70px;background-image:url('${esc(img.url)}');margin:0;"></div>`).join('')}</div>` : ''}
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-        <span class="pill" style="color:${STATUS_APROVACAO_COR[a.status]};border-color:${STATUS_APROVACAO_COR[a.status]};">${STATUS_APROVACAO_LABEL[a.status]}</span>
-        ${a.status==='pendente' ? `<button class="btn-ghost" style="font-size:12px;color:var(--sage);padding:0;" onclick="marcarAprovacaoManual('${a.id}')">marcar aprovado manualmente</button>` : ''}
-      </div>
-      ${a.comentario_cliente ? `<div style="background:var(--paper);border-radius:9px;padding:8px 10px;margin-top:8px;"><p class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);margin:0 0 3px;">Comentário do cliente</p><p style="font-size:12.5px;margin:0;">${esc(a.comentario_cliente)}</p></div>` : ''}
-    </div>`).join('');
+      ${a.eh_checklist ? `
+        <div style="margin-top:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <p class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);margin:0;">Respondidos pelo cliente: ${marcados}/${itensChecklist.length}</p>
+            <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="imprimirChecklistAprovacao('${a.id}')">ver / imprimir</button>
+          </div>
+          ${itensChecklist.map(i => `<p style="font-size:12.5px;margin:2px 0;color:${i.marcado?'var(--sage)':'var(--graphite)'};">${i.marcado?'✓':'○'} ${esc(i.item)}${i.resposta_opcao ? ` — <b>${esc(i.resposta_opcao)}</b>` : ''}</p>`).join('')}
+        </div>
+      ` : `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+          <span class="pill" style="color:${STATUS_APROVACAO_COR[a.status]};border-color:${STATUS_APROVACAO_COR[a.status]};">${STATUS_APROVACAO_LABEL[a.status]}</span>
+          ${a.status==='pendente' ? `<button class="btn-ghost" style="font-size:12px;color:var(--sage);padding:0;" onclick="marcarAprovacaoManual('${a.id}')">marcar aprovado manualmente</button>` : ''}
+        </div>
+        ${a.comentario_cliente ? `<div style="background:var(--paper);border-radius:9px;padding:8px 10px;margin-top:8px;"><p class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);margin:0 0 3px;">Comentário do cliente</p><p style="font-size:12.5px;margin:0;">${esc(a.comentario_cliente)}</p></div>` : ''}
+      `}
+    </div>`;
+  }).join('');
 }
 
 async function uploadImagemAprovacao(file){
@@ -3125,6 +3141,7 @@ async function criarAprovacao(e){
   e.preventDefault();
   const titulo = document.getElementById('apTitulo').value.trim();
   if(!titulo) return;
+  const ehChecklist = document.getElementById('apEhChecklist').checked;
 
   const resultado = await sb.from('aprovacoes_cliente').insert({
     projeto_id: projetoAtualId,
@@ -3132,8 +3149,39 @@ async function criarAprovacao(e){
     titulo,
     etapa_id: document.getElementById('apEtapa').value || null,
     descricao: document.getElementById('apDescricao').value.trim() || null,
+    eh_checklist: ehChecklist,
   }).select('id').single();
   if(checarErro(resultado, 'criar aprovação')) return;
+
+  if(ehChecklist){
+    const modelo = document.getElementById('apModeloChecklist').value;
+    let linhasItens = [];
+
+    if(modelo==='manual'){
+      const itens = document.getElementById('apItensChecklist').value.split('\n').map(i => i.trim()).filter(Boolean);
+      linhasItens = itens.map((item, i) => ({ aprovacao_id: resultado.data.id, item, ordem: i, opcoes: null }));
+    } else {
+      const grupos = modelo==='dele' ? [CHECKLIST_ARMARIO_TEMPLATE[0]]
+        : modelo==='dela' ? [CHECKLIST_ARMARIO_TEMPLATE[1]]
+        : CHECKLIST_ARMARIO_TEMPLATE; // dele_dela
+      let ordem = 0;
+      grupos.forEach(([grupoNome, itens]) => {
+        itens.forEach(([item, opcoes]) => {
+          linhasItens.push({
+            aprovacao_id: resultado.data.id,
+            item: `${item} (${grupoNome})`,
+            opcoes: opcoes.join(','),
+            ordem: ordem++,
+          });
+        });
+      });
+    }
+
+    if(linhasItens.length > 0){
+      const resultadoItens = await sb.from('aprovacao_checklist_itens').insert(linhasItens);
+      if(checarErro(resultadoItens, 'criar itens do checklist')) return;
+    }
+  }
 
   const arquivos = Array.from(document.getElementById('apImagens').files || []);
   if(arquivos.length > 0){
@@ -3145,8 +3193,49 @@ async function criarAprovacao(e){
   }
 
   e.target.reset();
+  document.getElementById('blocoChecklistAprovacao').classList.add('hidden');
   toggleForm('formNovaAprovacao', false);
   loadAprovacoes();
+}
+
+async function imprimirChecklistAprovacao(aprovacaoId){
+  const [{ data: aprovacao }, { data: itens }] = await Promise.all([
+    sb.from('aprovacoes_cliente').select('titulo,descricao,criado_em').eq('id', aprovacaoId).single(),
+    sb.from('aprovacao_checklist_itens').select('*').eq('aprovacao_id', aprovacaoId).order('ordem'),
+  ]);
+  if(!aprovacao || !dadosProjetoAtual) return;
+
+  // Agrupa pelo texto entre parênteses no fim do item (ex: "Cueca (Armário Dele)"), se houver
+  const grupos = new Map();
+  (itens||[]).forEach(i => {
+    const match = i.item.match(/^(.*)\s\(([^)]+)\)$/);
+    const grupo = match ? match[2] : 'Itens';
+    const nomeLimpo = match ? match[1] : i.item;
+    if(!grupos.has(grupo)) grupos.set(grupo, []);
+    grupos.get(grupo).push({ ...i, nomeLimpo });
+  });
+
+  const janela = window.open('', '_blank');
+  janela.document.write(`
+    <html><head><title>${esc(aprovacao.titulo)} — ${esc(dadosProjetoAtual.nome)}</title>
+    <style>body{font-family:Georgia,serif;max-width:680px;margin:50px auto;color:#211C18;line-height:1.5;padding:0 20px;}
+    h1{font-size:21px;margin-bottom:4px;}h2{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:#5C554C;margin-top:26px;border-bottom:1px solid #E3DACD;padding-bottom:6px;}
+    table{width:100%;border-collapse:collapse;font-size:13px;}
+    td{padding:6px 0;border-bottom:1px solid #F6F2EC;}
+    td:last-child{text-align:right;font-weight:600;}
+    .sem-resposta{color:#9C948A;font-style:italic;font-weight:400;}</style>
+    </head><body>
+    <h1>${esc(aprovacao.titulo)}</h1>
+    <p style="color:#5C554C;">${esc(dadosProjetoAtual.nome)} · ${new Date(aprovacao.criado_em).toLocaleDateString('pt-BR')}</p>
+    ${aprovacao.descricao ? `<p>${esc(aprovacao.descricao)}</p>` : ''}
+    ${Array.from(grupos.entries()).map(([grupo, itensGrupo]) => `
+      <h2>${esc(grupo)}</h2>
+      <table>
+        ${itensGrupo.map(i => `<tr><td>${esc(i.nomeLimpo)}</td><td class="${i.resposta_opcao?'':'sem-resposta'}">${esc(i.resposta_opcao || (i.marcado?'Marcado':'—'))}</td></tr>`).join('')}
+      </table>
+    `).join('')}
+    </body></html>`);
+  janela.document.close();
 }
 
 async function marcarAprovacaoManual(id){
@@ -3313,3 +3402,621 @@ function abrirAta(id){
     </body></html>`);
   janela.document.close();
 }
+
+/* ================= BRIEFING DO PROJETO ================= */
+const BRIEFING_TEMPLATE = [
+  ["Dados do Cliente", null, [
+    "Nome Completo",
+    "Telefone",
+    "E-mail",
+    "Tipo de Imóvel (Casa / Apartamento / Terreno / Comercial)",
+    "Área de Projeto",
+    "Endereço da obra",
+    "Situação do Imóvel (terreno vazio, terreno com construção, com construção existente, etc)",
+    "Projeto será executado em etapas ou de uma vez?",
+    "Programa de Necessidades (quantidade de cômodos, ambientes, vagas de garagem, área de lazer, etc)",
+  ]],
+  ["Estilo de Vida dos Moradores", "Perfil dos moradores", [
+    "Quantas pessoas moram na casa?",
+    "Idade dos moradores?",
+    "Profissão dos moradores?",
+    "Há alguma restrição de mobilidade ou necessidade especial?",
+    "Há intenção de aumentar a família em breve?",
+    "Alguém fuma?",
+  ]],
+  ["Estilo de Vida dos Moradores", "Rotina Diária", [
+    "Como é um dia típico de vocês em casa?",
+    "Onde costumam se reunir para as refeições?",
+    "A cozinha é um espaço de convivência ou mais funcional? Quem costuma cozinhar?",
+    "Gosta de cozinhar com os amigos?",
+  ]],
+  ["Estilo de Vida dos Moradores", "Trabalho e Estudo", [
+    "Trabalham de casa / Home Office / Rotina de estudos?",
+  ]],
+  ["Estilo de Vida dos Moradores", "Lazer e Convívio", [
+    "Hobby favorito?",
+    "O que você ama fazer em casa?",
+    "Qual ambiente é o “coração da casa” para vocês?",
+    "Quais atividades costumam fazer juntos em casa? (filmes, jogos, leitura, música, exercícios)",
+    "Aos finais de semana vocês costumam ficar em casa?",
+    "Costumam receber com frequência? Quantas pessoas em média? Normalmente se reúnem em qual ambiente da casa?",
+    "Cultiva plantas, flores ou temperos? Onde gostaria de ter um cantinho para essa prática?",
+    "Você tem o hábito de ler? Qual o seu lugar preferido na casa para isso?",
+    "Pratica algum outro esporte que precise de espaço para guardar os acessórios?",
+  ]],
+  ["Estilo de Vida dos Moradores", "Hábitos Específicos / Necessidades", [
+    "Existem necessidades funcionais que devemos considerar no projeto? (ex: espaço para guardar equipamentos, instrumentos musicais, bicicletas, coleções, etc.)",
+    "Há objetos ou móveis que precisam ser mantidos no novo projeto? (ex: piano, mesa de jantar, coleção, obra de arte)",
+    "Você coleciona objetos?",
+    "Tem objetos a serem guardados com chaves ou cofre?",
+  ]],
+  ["Estilo de Vida dos Moradores", "Animais de estimação", [
+    "Possui animais de estimação?",
+    "Deseja um espaço específico para eles (ex: caminha, banho, área de higiene)?",
+    "Há locais onde não devem ter acesso?",
+    "Alguma necessidade especial a considerar (piso, segurança, materiais, odores, limpeza)?",
+  ]],
+  ["Estilo de Vida dos Moradores", "Desejos e Expectativas", [
+    "Quando pensam na casa dos sonhos, o que vem à mente primeiro?",
+    "Qual sensação vocês gostariam de ter ao chegar em casa?",
+    "Há alguma referência de estilo de casa que admiram?",
+    "O que você não gosta na sua casa atual?",
+    "Quando imagina a disposição dos cômodos da casa, o que você visualiza? Importante alinhar as expectativas das posições dos quartos e salas em relação à piscina, rua, etc.",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Piso (Porcelanato, Vinílico, Laminado)", [
+    "Qual opção de piso?",
+    "Qual cor / tom?",
+    "Acabamento fosco ou brilho?",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Pedra (Quartzo, Granito, Mármore, Porcelanato)", [
+    "Qual tipo de pedra?",
+    "Igual em toda a casa?",
+    "Qual cor?",
+    "Acabamento: Rebaixo Italiano?",
+    "Frontão alto / baixo?",
+    "Outras observações importantes",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Revestimentos", [
+    "Reprodução pedra, cimento, madeira, marmorizado?",
+    "Acabamento fosco ou brilho?",
+    "Preferência de marca?",
+    "Preferência pela dimensão da peça (90x90, 120x120..)?",
+    "Tem fornecedor ou marceneiro de confiança que deseja manter?",
+    "Outras observações importantes",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Louças", [
+    "Quais marcas de louças você prefere? (Ex.: Deca, Docol, Roca, Hansgrohe, Grohe)",
+    "Prefere branca comum ou gostaria de alguma cor diferente?",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Metais", [
+    "Quais marcas de metais você prefere? (Ex.: Deca, Docol, Roca, Hansgrohe, Grohe)",
+    "Qual cor prefere? Cromado, Preto, Escovado (Inox, Níquel ou Aço), Dourado, Rose Gold, Cobre, Bronze?",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Teto / Forro", [
+    "Qual tipo de teto ou forro você deseja? (Ex.: gesso rebaixado, madeira, laje aparente)",
+    "Gosta de cortineiro iluminado?",
+    "Gosta de sanca iluminada nos banheiros?",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Cores", [
+    "Cores preferidas?",
+    "Cores que não gosta?",
+    "Prefere tons pastéis ou vibrantes?",
+    "Prefere cinza ou bege?",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Paredes", [
+    "Prefere paredes brancas ou com cores?",
+    "Gosta de pontos de cor ou ambientes neutros?",
+    "Gosta de papel de parede, painéis, boiserie?",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Decoração", [
+    "Gosta de quadros, esculturas, obras de arte? Quais tipos?",
+    "Gosta de espelhos na decoração?",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Iluminação", [
+    "Qual tipo de iluminação você gosta? (exemplo: muita luz, pouca luz, direta, fria, quente)",
+    "Deseja fitas de LED, spots, pendentes ou arandelas?",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Esquadrias", [
+    "Qual material você prefere para esquadrias? (Ex.: alumínio, madeira, PVC)",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Marcenaria", [
+    "Quais cores de MDF você gosta?",
+    "Quais tons de madeira, mais claro / escuro?",
+    "Tem alguma marca de preferência?",
+    "Tem fornecedor ou marceneiro de confiança que deseja manter?",
+  ]],
+  ["Materialidade / Conceito do Projeto", "Outros pontos", [
+    "Gosta e deseja automação? (Som, vídeo, ar condicionado, cortinas)",
+    "Tem preferência no tipo de aquecimento: elétrico, boiler ou solar?",
+    "Qual seu “budget / orçamento” para esta reforma?",
+  ]],
+  ["Cozinha", "Layout e estilo", [
+    "Qual o tipo de cozinha desejada? Fechada / Integrada / Com ilha / Com torre quente",
+    "Qual estilo de cozinha te agrada mais? Provençal / Moderno / Rústico / Industrial / Escandinavo / Outro",
+    "Deseja espaço para refeições? Balcão / Mesa / Ilha com função / Não",
+    "Deseja uma despensa próxima à cozinha?",
+    "Outras observações importantes",
+  ]],
+  ["Cozinha", "Eletrodomésticos e equipamentos", [
+    "Cooktop: gás / indução / elétrico — quantas bocas?",
+    "Forno: elétrico / a gás — embutido ou externo?",
+    "Micro-ondas: embutido ou de bancada?",
+    "Lava-louças: sim / não — embutida ou de piso?",
+    "Geladeira: duplex / side-by-side / french door — com dispenser?",
+    "Cervejeira ou adega climatizada?",
+    "Coifa ou depurador? Tem ideia de modelo?",
+    "Máquina de café de bancada?",
+    "Outros: air fryer, mixer, liquidificador, purificador de água, etc.",
+    "Gostaria de uma churrasqueira ou forno para pizza? Se for churrasqueira, a carvão, elétrica ou a gás?",
+    "Algum eletrodoméstico será reaproveitado? Quais?",
+    "Tem preferência por marcas ou modelos específicos?",
+    "Deseja que os eletros fiquem aparentes ou embutidos na marcenaria?",
+  ]],
+  ["Cozinha", "Cubas, torneiras e acessórios", [
+    "Qual tipo de cuba você prefere? Inox / Quartzo / Cerâmica / Esculpida",
+    "Quantas cubas? Simples / dupla / cuba auxiliar",
+    "Qual tipo de torneira você prefere? Monocomando / Gourmet / Articulada / Com filtro",
+    "Deseja lixeira embutida? Em qual local?",
+    "Deseja porta sabão embutido na bancada?",
+    "Gosta da ideia de cristaleira ou fruteira embutida?",
+  ]],
+  ["Cozinha", "Marcenaria e acabamentos", [
+    "Como prefere os armários inferiores? Gavetas / Portas / Gavetões",
+    "E os superiores? Portas verticais / horizontais / basculantes",
+    "Quais cores e acabamentos de marcenaria você prefere? (fosco, brilho, amadeirado, colorido, etc.)",
+  ]],
+  ["Cozinha", "Revestimentos e piso", [
+    "Qual tipo de revestimento de parede você deseja? Cerâmica / Porcelanato / Pastilha / Painel / Outro",
+    "Tem preferência por cor, textura ou padrão?",
+    "Deseja o mesmo piso da casa ou diferente?",
+  ]],
+  ["Cozinha", "Iluminação", [
+    "Como você deseja a iluminação nesse ambiente?",
+    "Tem alguma observação específica?",
+  ]],
+  ["Sala de Estar e Jantar", null, [
+    "Prefere sala integrada ou separada da cozinha?",
+    "Deseja que a sala tenha acesso direto à varanda ou área externa?",
+    "Quantas pessoas costumam usar esse espaço?",
+    "Quais equipamentos deseja incluir? (TV, som, projetor, etc.)",
+    "Qual o tamanho ideal da TV?",
+    "Quantos lugares deseja na mesa de jantar?",
+    "Prefere mesa redonda, quadrada ou retangular?",
+    "Deseja buffet, aparador ou cristaleira como apoio?",
+    "Qual estilo de decoração você prefere?",
+    "Gosta de quadros, esculturas ou objetos decorativos?",
+    "Há algum móvel existente que será reaproveitado?",
+    "Que tipo de sofá você gosta? Retrátil / Fixo / Modular",
+    "Gosta de tapetes, cortinas, quadros? Tem preferência por estilo?",
+    "Deseja incluir espaço para home office?",
+    "Que tipo de iluminação você prefere nesse ambiente?",
+    "Gosta de plantas? Naturais ou artificiais?",
+    "Outras observações importantes",
+  ]],
+  ["Sala de Estar e Jantar", "Iluminação", [
+    "Como você deseja a iluminação nesse ambiente?",
+    "Tem alguma observação específica?",
+  ]],
+  ["Quarto Casal", null, [
+    "Qual o tamanho da cama desejada? (Casal, Queen, King ou SuperKing)",
+    "Deseja TV no quarto?",
+    "Prefere closet ou armário? Quantas portas/gavetas?",
+    "Deseja penteadeira?",
+    "Precisa de cofre embutido?",
+    "Deseja espaço para estudos, leitura ou maquiagem?",
+    "Qual estilo de cabeceira você prefere? Vertical / Horizontal / Estofada / MDF",
+    "Gosta de espelhos? Em quais locais?",
+    "Prefere cortinas ou persianas?",
+    "Gosta de tapetes no quarto?",
+    "Prefere decoração simétrica ou orgânica?",
+    "Que tipo de iluminação deseja? Pendentes / Arandelas / Abajur",
+    "Qual tipo de piso prefere?",
+    "Quais cores de MDF mais lhe agradam?",
+    "Tem referências visuais de quartos que gosta?",
+    "Há hábitos específicos que influenciam esse ambiente?",
+    "Outras observações importantes",
+  ]],
+  ["Quarto Filhos / Infantil", null, [
+    "Qual a idade da criança ou jovem?",
+    "Qual o tamanho da cama desejada? Solteiro / Viúva / Casal",
+    "Deseja incluir berço ou cama montessoriana?",
+    "Deseja TV no quarto?",
+    "Precisa de espaço para estudos ou atividades?",
+    "Deseja incluir brinquedoteca ou área lúdica?",
+    "Gosta de incluir nichos, prateleiras ou estantes?",
+    "Prefere armário ou cômoda?",
+    "Deseja incluir espaço para leitura?",
+    "Gosta de temas ou personagens na decoração?",
+    "Prefere cores vibrantes, pastéis ou neutras?",
+    "Que tipo de iluminação deseja? Luz geral / Luz noturna / LED colorido",
+    "Deseja cortinas ou persianas?",
+    "Gosta de tapetes?",
+    "Há alguma necessidade especial (acessibilidade, segurança, alergias)?",
+    "Tem referências visuais de quartos infantis que gosta?",
+    "Outras observações importantes",
+  ]],
+  ["Quarto de Hóspedes", null, [
+    "Qual o tamanho da cama desejada? Solteiro / Casal / Queen",
+    "Deseja TV no quarto?",
+    "Precisa de armário ou apenas espaço para mala?",
+    "Deseja incluir escrivaninha ou apoio para trabalho?",
+    "Prefere decoração neutra ou com personalidade?",
+    "Gosta de incluir quadros, espelhos ou objetos decorativos?",
+    "Deseja cortinas ou persianas?",
+    "Gosta de tapetes nesse ambiente?",
+    "Que tipo de iluminação deseja?",
+    "Precisa de tomadas e pontos de carregamento acessíveis?",
+    "Outras observações importantes",
+  ]],
+  ["Home Office", null, [
+    "Deseja suíte reversível ou ambiente separado?",
+    "Qual sensação gostaria de sentir nesse espaço?",
+    "Quais cores prefere e quais deseja evitar?",
+    "Há mobiliário existente que será reaproveitado?",
+    "Quais itens deseja incluir? Mesa / Estante / Cofre / Nichos",
+    "Deseja mini copa, cantinho do café ou frigobar?",
+    "Receberá clientes externos nesse espaço?",
+    "Qual tipo de cortina prefere?",
+    "Haverá equipamentos específicos? Impressora 3D, encadernadora, etc.",
+    "Qual tipo de piso deseja?",
+    "Deseja espaço para leitura?",
+    "Deseja automação ou som embutido?",
+    "Outras observações importantes",
+  ]],
+  ["Closet", null, [
+    "Prefere closet aberto ou com portas?",
+    "Se com portas, prefere MDF ou vidro?",
+    "Deseja iluminação interna nos armários?",
+    "Precisa de espelho de corpo inteiro?",
+    "Deseja ilha central?",
+    "O closet será dividido para duas pessoas?",
+    "Precisa de espaço para vestidos longos?",
+    "Quantos sapatos possui? Prefere armazenar em altura média ou baixa?",
+    "Prefere gavetas ou prateleiras?",
+    "Deseja penteadeira dentro do closet?",
+    "Qual tipo de piso deseja?",
+    "Prefere tons claros ou escuros?",
+    "Outras observações importantes",
+  ]],
+  ["Closet", "Iluminação", [
+    "Como você deseja a iluminação nesse ambiente?",
+    "Tem alguma observação específica?",
+  ]],
+  ["Banheiros", null, [
+    "Quantas pessoas usarão esse banheiro?",
+    "Qual estilo de decoração você prefere?",
+    "Qual tipo de cuba deseja? Apoio / Embutida / Semi-encaixe / Esculpida / Sobrepor",
+    "Qual tipo de bacia sanitária prefere? Com caixa / Sem caixa / Suspensa",
+    "Deseja ducha higiênica? Qual lado?",
+    "Qual tipo de chuveiro prefere? De teto / De parede / Elétrico / Aquecido / Duplo",
+    "Deseja nicho dentro do box?",
+    "Deseja banheira?",
+    "Deseja toalheiro aquecido?",
+    "Prefere espelho redondo ou retangular?",
+    "Deseja armários embutidos no espelho?",
+    "Precisa de muito armazenamento?",
+    "Deseja som embutido ou automação?",
+    "Prefere ralo oculto, padrão, linear ou quadrado?",
+    "Qual tipo de abertura do box prefere? Abrir / Correr / Camarão",
+    "Quais revestimentos e metais deseja usar?",
+    "Outras observações importantes",
+  ]],
+  ["Banheiros", "Iluminação", [
+    "Como você deseja a iluminação nesse ambiente?",
+    "Tem alguma observação específica?",
+  ]],
+  ["Varanda", null, [
+    "Prefere aberta ou fechada?",
+    "Quais equipamentos deseja incluir? (churrasqueira, forno de pizza, cervejeira, TV, etc.)",
+    "Se for churrasqueira, a carvão, elétrica ou a gás?",
+    "Cervejeira ou adega?",
+    "Deseja plantas? Naturais ou artificiais? Quais espécies?",
+    "Gostaria de redes ou balanço?",
+  ]],
+  ["Varanda", "Iluminação", [
+    "Como você deseja a iluminação nesse ambiente?",
+    "Tem alguma observação específica?",
+  ]],
+  ["Área Gourmet", null, [
+    "Quais equipamentos deseja incluir? (churrasqueira, forno de pizza, cervejeira, TV, etc.)",
+    "Qual estilo prefere? Moderno / Rústico / Outro",
+    "Quais revestimentos gosta? Cimento queimado / Tijolinho / Amadeirado",
+    "Deseja o mesmo piso da casa ou diferente?",
+    "Deseja ilha? Com função ou apenas apoio?",
+    "Precisa de muitos armários?",
+    "Deseja criar diferentes espaços de interação? (TV, redes, mesa, ilha com assentos)",
+    "Terá piscina? Qual formato? Com prainha, hidro ou sauna integrada?",
+    "Outras observações importantes sobre esse espaço?",
+    "E os superiores? Portas verticais / horizontais",
+    "Quais cores e acabamentos de marcenaria você prefere?",
+    "Qual tipo de revestimento de parede e piso deseja?",
+    "Qual estilo de cozinha te agrada mais? Provençal / Moderno / Rústico / Outro",
+    "Deseja espaço para refeições? Balcão / Mesa / Ilha com função",
+    "Deseja uma despensa próxima à cozinha?",
+    "Haverá alguma intervenção civil? (demolições, novos pontos hidráulicos, etc.)",
+  ]],
+  ["Área Gourmet", "Iluminação", [
+    "Como você deseja a iluminação nesse ambiente?",
+    "Tem alguma observação específica?",
+  ]],
+  ["Jardim Externo", null, [
+    "Deseja jardim frontal, lateral ou nos fundos?",
+    "Qual estilo de jardim prefere? Tropical / Contemporâneo / Japonês / Desértico / Outro",
+    "Quais tipos de vegetação deseja? Grama / Arbustos / Árvores / Flores",
+    "Deseja horta ou espaço para cultivo de temperos?",
+    "Deseja sistema de irrigação automatizado?",
+    "Que tipo de iluminação externa prefere? Decorativa / Funcional / Solar",
+    "Deseja fonte, espelho d’água ou lago ornamental?",
+    "Que tipo de caminhos e pisos prefere? Pedra / Madeira / Cimentício / Outro",
+    "Deseja mobiliário externo? Bancos / Redes / Espreguiçadeiras",
+    "Precisa de espaço para pets?",
+    "Precisa de espaço para crianças?",
+    "Tem referências visuais de jardins que gosta?",
+    "Deseja um jardim de baixa manutenção?",
+  ]],
+  ["Jardim Externo", "Iluminação", [
+    "Como você deseja a iluminação nesse ambiente?",
+    "Tem alguma observação específica?",
+  ]],
+  ["Lavanderia e Área de Serviço", null, [
+    "Quais funções a lavanderia deve atender? (lavar, passar, depósito, etc.)",
+    "Deseja acesso direto à área externa?",
+    "Quantos tanques serão necessários? Qual tipo? Inox / Louça / Pedra",
+    "Qual tipo de máquina você usará? Superior / Frontal / Lava e seca",
+    "Terá mais de uma máquina?",
+    "Qual tipo de varal prefere? Piso / Parede / Teto",
+    "Deseja torneiras com aquecimento?",
+    "Prefere torneira de bancada ou de parede?",
+    "Qual tipo de piso deseja?",
+    "Quais cores para bancada e marcenaria você prefere?",
+    "Gosta de marcenaria colorida?",
+    "Tem referências visuais de lavanderias que gosta?",
+  ]],
+  ["Lavanderia e Área de Serviço", "Iluminação", [
+    "Como você deseja a iluminação nesse ambiente?",
+    "Tem alguma observação específica?",
+  ]],
+  ["Fachada", null, [
+    "Qual estilo? Moderno, Clássico / Neoclássico, Contemporâneo, Minimalista, Industrial, Colonial, Rústico, Mediterrâneo, Escandinavo?",
+    "Gosta de fachadas brancas ou com tons escuros?",
+    "Gosta de pedras na fachada?",
+    "Gosta de jardins?",
+    "Que tipo de material prefere nas calçadas?",
+    "Gostaria de alguma fonte ou espelho d'água?",
+    "Que tipo de textura lhe atrai (em fachadas)? Madeira, cimento, metais, pedras?",
+    "Outras observações importantes",
+  ]],
+];
+
+let modoBriefingAtual = 'editar';
+
+async function loadBriefing(){
+  const cont = document.getElementById('briefingConteudo');
+  cont.innerHTML = '<p class="muted">Carregando...</p>';
+
+  const { data: respostas } = await sb.from('briefing_respostas').select('*').eq('projeto_id', projetoAtualId).order('ordem');
+  window._briefingRespostas = respostas || [];
+
+  if(!respostas || respostas.length===0){
+    cont.innerHTML = `<div class="card" style="max-width:560px;">
+      <p class="label">Briefing</p>
+      <p class="muted" style="margin-top:0;">As mesmas ${BRIEFING_TEMPLATE.reduce((s,g)=>s+g[2].length,0)} perguntas do formulário que vocês já usam, organizadas por seção — preenche aqui e fica salvo automaticamente, sem precisar da planilha.</p>
+      <button class="btn" onclick="iniciarBriefing()">+ Iniciar briefing</button>
+    </div>`;
+    return;
+  }
+
+  const total = respostas.length;
+  const respondidas = respostas.filter(r => r.resposta && r.resposta.trim()).length;
+  const pct = total>0 ? Math.round((respondidas/total)*100) : 0;
+  const secoes = [...new Set(respostas.map(r => r.secao))];
+
+  const cabecalho = `
+    <div class="briefing-resumo-card">
+      <span class="briefing-resumo-pct">${pct}%</span>
+      <div style="flex:1;">
+        <p style="margin:0;font-size:14px;">${respondidas} de ${total} perguntas respondidas</p>
+        <p class="muted" style="margin:2px 0 0;">${modoBriefingAtual==='editar' ? 'Preenche aos poucos, o sistema salva sozinho a cada resposta.' : 'Modo consulta — só as perguntas já respondidas.'}</p>
+      </div>
+      <div class="chip-select" style="margin:0;">
+        <button type="button" class="chip ${modoBriefingAtual==='editar'?'on':''}" onclick="mudarModoBriefing('editar')">Editar</button>
+        <button type="button" class="chip ${modoBriefingAtual==='resumo'?'on':''}" onclick="mudarModoBriefing('resumo')">Resumo</button>
+      </div>
+      ${modoBriefingAtual==='resumo' ? `<button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="imprimirBriefing()">Imprimir / PDF</button>` : ''}
+    </div>`;
+
+  if(modoBriefingAtual==='resumo'){
+    const corpoResumo = secoes.map(secao => {
+      const itensRespondidos = respostas.filter(r => r.secao===secao && r.resposta && r.resposta.trim());
+      if(itensRespondidos.length===0) return '';
+      return `<div class="card" style="margin-bottom:14px;">
+        <p class="label" style="margin-bottom:10px;">${esc(secao)}</p>
+        ${itensRespondidos.map(r => `
+          <div style="margin-bottom:10px;">
+            <p style="font-size:12.5px;color:var(--graphite);margin:0;">${esc(r.pergunta)}</p>
+            <p style="font-size:13.5px;margin:2px 0 0;">${esc(r.resposta)}</p>
+          </div>`).join('')}
+      </div>`;
+    }).join('');
+    cont.innerHTML = cabecalho + (corpoResumo || '<p class="muted">Nenhuma pergunta respondida ainda.</p>');
+    return;
+  }
+
+  const corpo = secoes.map(secao => {
+    const itensSecao = respostas.filter(r => r.secao===secao);
+    const respondidasSecao = itensSecao.filter(r => r.resposta && r.resposta.trim()).length;
+    const subgrupos = [...new Set(itensSecao.map(r => r.subgrupo || '_'))];
+    return `<details class="checklist-ambiente" style="margin-bottom:10px;">
+      <summary class="checklist-ambiente-titulo">
+        <span>${esc(secao)}</span>
+        <span class="checklist-ambiente-count ${respondidasSecao===itensSecao.length?'completo':''}">${respondidasSecao}/${itensSecao.length}</span>
+      </summary>
+      <div class="checklist-ambiente-corpo">
+        <div style="display:flex;gap:14px;margin-bottom:10px;">
+          <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="adicionarPerguntaBriefing('${secao.replace(/'/g,"\\'")}', null)">+ pergunta</button>
+          <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="duplicarSecaoBriefing('${secao.replace(/'/g,"\\'")}')">⧉ duplicar seção</button>
+        </div>
+        ${subgrupos.map(sg => `
+          ${sg!=='_' ? `<p class="rev-subgrupo-titulo" style="margin-top:10px;">${esc(sg)}</p>` : ''}
+          ${itensSecao.filter(r => (r.subgrupo||'_')===sg).map(r => `
+            <div class="briefing-pergunta">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                <label style="flex:1;">${esc(r.pergunta)}</label>
+                <div style="display:flex;gap:8px;flex-shrink:0;">
+                  <button class="edit-link" onclick="editarPerguntaBriefing('${r.id}')">editar</button>
+                  <button class="remove-link" onclick="excluirPerguntaBriefing('${r.id}')">×</button>
+                </div>
+              </div>
+              <textarea rows="2" onblur="salvarRespostaBriefing('${r.id}', this.value)" placeholder="Resposta...">${esc(r.resposta||'')}</textarea>
+            </div>`).join('')}
+        `).join('')}
+      </div>
+    </details>`;
+  }).join('');
+
+  cont.innerHTML = cabecalho + corpo;
+}
+
+function mudarModoBriefing(modo){
+  modoBriefingAtual = modo;
+  loadBriefing();
+}
+
+function imprimirBriefing(){
+  if(!dadosProjetoAtual) return;
+  const respostas = (window._briefingRespostas||[]).filter(r => r.resposta && r.resposta.trim());
+  const secoes = [...new Set(respostas.map(r => r.secao))];
+  const janela = window.open('', '_blank');
+  janela.document.write(`
+    <html><head><title>Briefing — ${esc(dadosProjetoAtual.nome)}</title>
+    <style>body{font-family:Georgia,serif;max-width:680px;margin:50px auto;color:#211C18;line-height:1.5;padding:0 20px;}
+    h1{font-size:21px;margin-bottom:4px;}h2{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:#5C554C;margin-top:26px;border-bottom:1px solid #E3DACD;padding-bottom:6px;}
+    p.q{font-size:12.5px;color:#5C554C;margin:12px 0 0;}p.a{font-size:14px;margin:2px 0 0;white-space:pre-wrap;}</style>
+    </head><body>
+    <h1>Briefing</h1>
+    <p style="color:#5C554C;">${esc(dadosProjetoAtual.nome)}</p>
+    ${secoes.map(secao => `
+      <h2>${esc(secao)}</h2>
+      ${respostas.filter(r => r.secao===secao).map(r => `<p class="q">${esc(r.pergunta)}</p><p class="a">${esc(r.resposta)}</p>`).join('')}
+    `).join('')}
+    </body></html>`);
+  janela.document.close();
+}
+
+async function iniciarBriefing(){
+  let ordem = 0;
+  const linhas = [];
+  BRIEFING_TEMPLATE.forEach(([secao, subgrupo, perguntas]) => {
+    perguntas.forEach(pergunta => {
+      linhas.push({ projeto_id: projetoAtualId, secao, subgrupo, pergunta, ordem: ordem++ });
+    });
+  });
+  const resultado = await sb.from('briefing_respostas').insert(linhas);
+  if(checarErro(resultado, 'iniciar briefing')) return;
+  loadBriefing();
+}
+
+async function editarPerguntaBriefing(id){
+  const item = (window._briefingRespostas||[]).find(r => r.id===id);
+  if(!item) return;
+  const novoTexto = prompt('Editar pergunta:', item.pergunta);
+  if(novoTexto===null || !novoTexto.trim()) return;
+  const resultado = await sb.from('briefing_respostas').update({ pergunta: novoTexto.trim() }).eq('id', id);
+  if(checarErro(resultado, 'editar pergunta')) return;
+  loadBriefing();
+}
+
+async function excluirPerguntaBriefing(id){
+  if(!confirm('Remover essa pergunta desse projeto? Só afeta esse projeto, o modelo padrão continua igual pros próximos.')) return;
+  await sb.from('briefing_respostas').delete().eq('id', id);
+  loadBriefing();
+}
+
+async function adicionarPerguntaBriefing(secao, subgrupo){
+  const pergunta = prompt('Nova pergunta:');
+  if(!pergunta || !pergunta.trim()) return;
+  const resultado = await sb.from('briefing_respostas').insert({
+    projeto_id: projetoAtualId, secao, subgrupo, pergunta: pergunta.trim(), ordem: Date.now(),
+  });
+  if(checarErro(resultado, 'adicionar pergunta')) return;
+  loadBriefing();
+}
+
+async function duplicarSecaoBriefing(secaoAtual){
+  const novoNome = prompt('Nome da nova seção (ex: "Quarto de Hóspedes 2"):', `${secaoAtual} (cópia)`);
+  if(!novoNome || !novoNome.trim()) return;
+  const itensOrigem = (window._briefingRespostas||[]).filter(r => r.secao===secaoAtual);
+  const linhas = itensOrigem.map((r, i) => ({
+    projeto_id: projetoAtualId, secao: novoNome.trim(), subgrupo: r.subgrupo, pergunta: r.pergunta, ordem: Date.now()+i,
+  }));
+  const resultado = await sb.from('briefing_respostas').insert(linhas);
+  if(checarErro(resultado, 'duplicar seção')) return;
+  loadBriefing();
+}
+
+async function salvarRespostaBriefing(id, texto){
+  await sb.from('briefing_respostas').update({ resposta: texto }).eq('id', id);
+}
+
+/* ================= CHECKLIST DE ARMÁRIOS (modelo pronto) ================= */
+const CHECKLIST_ARMARIO_TEMPLATE = [
+  ["Armário Dele", [
+    ["Cueca", ["Gaveta"]],
+    ["Meia", ["Gaveta"]],
+    ["Pijama", ["Gaveta"]],
+    ["Roupa de praia", ["Gaveta", "Caixa"]],
+    ["Bermudas", ["Gaveta", "Prateleira", "Pendurada"]],
+    ["Roupa fitness", ["Gaveta", "Prateleira", "Pendurada"]],
+    ["Calça jeans", ["Pendurada", "Prateleira (dobrada)"]],
+    ["Camisetas", ["Pendurada", "Prateleira (dobrada)", "Gaveta"]],
+    ["Camisas", ["Pendurada"]],
+    ["Calça social", ["Pendurada"]],
+    ["Blazer", ["Pendurada"]],
+    ["Colete", ["Pendurada", "Prateleira (dobrada)"]],
+    ["Terno", ["Pendurada"]],
+    ["Casaco/Jaqueta", ["Pendurada", "Prateleira (dobrada)"]],
+    ["Blusão/Suéter", ["Prateleira (dobrada)"]],
+    ["Cintos", ["Gaveta", "Caixa", "Pendurado"]],
+    ["Cachecol", ["Gaveta", "Caixa", "Pendurado"]],
+    ["Óculos/Relógio", ["Gaveta", "Caixa"]],
+    ["Chapéu", ["Gaveta", "Caixa", "Pendurado"]],
+    ["Sapatos/Coturnos", ["Sapateiro", "Caixa"]],
+    ["Tênis", ["Sapateiro", "Caixa"]],
+    ["Roupa de cama", ["Gaveta", "Prateleira (dobrada)"]],
+    ["Toalha", ["Gaveta", "Prateleira (dobrada)"]],
+    ["Mala", ["Prateleira"]],
+  ]],
+  ["Armário Dela", [
+    ["Calcinha", ["Gaveta"]],
+    ["Sutiã", ["Gaveta"]],
+    ["Meia", ["Gaveta"]],
+    ["Biquíni/Maiô", ["Gaveta", "Caixa"]],
+    ["Saída de praia", ["Gaveta", "Pendurada", "Caixa"]],
+    ["Roupa fitness", ["Gaveta", "Prateleira"]],
+    ["Calça", ["Pendurada", "Prateleira (dobrada)", "Gaveta"]],
+    ["Saias", ["Pendurada", "Prateleira (dobrada)", "Gaveta"]],
+    ["Shorts/Bermudas", ["Pendurada", "Prateleira (dobrada)", "Gaveta"]],
+    ["Camiseta curta", ["Pendurada", "Prateleira (dobrada)", "Gaveta"]],
+    ["Camiseta manga longa", ["Pendurada", "Prateleira (dobrada)", "Gaveta"]],
+    ["Camisa", ["Pendurada", "Gaveta"]],
+    ["Blusa/Top", ["Pendurada", "Prateleira (dobrada)", "Gaveta"]],
+    ["Blazer", ["Pendurada"]],
+    ["Casaco/Jaqueta", ["Pendurada", "Prateleira (dobrada)"]],
+    ["Blusão/Suéter", ["Prateleira (dobrada)"]],
+    ["Vestido", ["Pendurada", "Prateleira (dobrada)"]],
+    ["Coletes/Paetês", ["Pendurada", "Prateleira (dobrada)"]],
+    ["Acessórios", ["Gaveta", "Caixa"]],
+    ["Cintos", ["Gaveta", "Caixa", "Pendurada"]],
+    ["Bolsa", ["Gaveta", "Pendurada", "Prateleira"]],
+    ["Clutch/Carteiras", ["Gaveta", "Caixa", "Prateleira"]],
+    ["Lenços", ["Gaveta", "Caixa", "Pendurada"]],
+    ["Óculos/Relógios", ["Gaveta", "Caixa"]],
+    ["Chapéu", ["Gaveta", "Caixa", "Pendurada"]],
+    ["Sapatos/Sandálias", ["Sapateiro", "Caixa", "Gaveta"]],
+    ["Botas", ["Sapateiro", "Caixa", "Gaveta"]],
+    ["Pijama", ["Gaveta", "Prateleira (dobrada)"]],
+    ["Roupa de cama", ["Gaveta", "Prateleira (dobrada)"]],
+    ["Toalha", ["Gaveta", "Prateleira (dobrada)"]],
+    ["Mala", ["Prateleira"]],
+  ]],
+];

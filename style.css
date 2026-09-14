@@ -330,3 +330,11 @@
   .estrelas-display{display:flex;gap:2px;margin-top:6px;}
   .estrelas-display span{font-size:14px;line-height:1;color:var(--line);}
   .estrelas-display span.ativa{color:var(--terracotta);}
+
+  /* Briefing */
+  .briefing-pergunta{margin-bottom:12px;}
+  .briefing-pergunta label{font-size:12.5px;color:var(--ink);display:block;margin-bottom:4px;}
+  .briefing-pergunta textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;font-family:inherit;resize:vertical;}
+  .briefing-pergunta textarea:focus{outline:none;border-color:var(--terracotta);}
+  .briefing-resumo-card{display:flex;align-items:center;gap:16px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:20px;}
+  .briefing-resumo-pct{font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:var(--terracotta);}

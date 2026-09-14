@@ -308,6 +308,7 @@
           <button type="button" class="pd-tab on" data-tab="geral" onclick="trocarAbaProjeto('geral')">Visão geral</button>
 
           <p class="pd-nav-group">Planejamento</p>
+          <button type="button" class="pd-tab" data-tab="briefing" onclick="trocarAbaProjeto('briefing')">Briefing</button>
           <button type="button" class="pd-tab" data-tab="etapas" onclick="trocarAbaProjeto('etapas')">Etapas</button>
           <button type="button" class="pd-tab" data-tab="checklist" onclick="trocarAbaProjeto('checklist')">Checklist Executivo</button>
 
@@ -334,6 +335,11 @@
         <div class="pd-content">
 
       <!-- Sub-aba: Visão geral (Tarefas + Financeiro) -->
+      <!-- Sub-aba: Briefing -->
+      <div id="pdtab-briefing" class="pd-tabcontent hidden">
+        <div id="briefingConteudo"></div>
+      </div>
+
       <div id="pdtab-geral" class="pd-tabcontent">
         <div class="grid" style="grid-template-columns:1.1fr 1.1fr 0.8fr;gap:32px;">
           <div>
@@ -553,6 +559,25 @@
           <input id="apTitulo" required placeholder="Título (ex: Aprovação do Estudo Preliminar)" />
           <select id="apEtapa"><option value="">Sem etapa vinculada</option></select>
           <textarea id="apDescricao" placeholder="Descrição / o que o cliente deve avaliar (opcional)" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
+
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--graphite);margin-bottom:10px;padding:10px;background:var(--paper);border-radius:9px;">
+            <input id="apEhChecklist" type="checkbox" onchange="document.getElementById('blocoChecklistAprovacao').classList.toggle('hidden', !this.checked)" />
+            <span>É um checklist pra ele marcar item por item (ex: conferência de armários) — em vez de só aprovar/ajustar</span>
+          </label>
+          <div id="blocoChecklistAprovacao" class="hidden" style="margin-bottom:10px;">
+            <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Modelo pronto (opcional)</label>
+            <select id="apModeloChecklist" onchange="document.getElementById('blocoItensManuais').classList.toggle('hidden', this.value!=='manual')" style="margin-bottom:10px;">
+              <option value="manual">Nenhum — vou digitar os itens</option>
+              <option value="dele">Armário Dele</option>
+              <option value="dela">Armário Dela</option>
+              <option value="dele_dela">Armário Dele + Dela</option>
+            </select>
+            <div id="blocoItensManuais">
+              <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Itens do checklist (um por linha)</label>
+              <textarea id="apItensChecklist" rows="5" placeholder="Ex:&#10;Armário do quarto casal&#10;Armário do quarto 2&#10;Closet&#10;Armário da cozinha" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;"></textarea>
+            </div>
+          </div>
+
           <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Imagens (opcional — útil pra 3D)</label>
           <input id="apImagens" type="file" accept="image/*" multiple style="margin-bottom:10px;" />
           <div class="form-actions">
