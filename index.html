@@ -182,16 +182,15 @@
 
       <div class="chip-select" style="margin-bottom:24px;">
         <button type="button" class="chip pj-tab on" data-tab="dashboard" onclick="trocarAbaProjetosModulo('dashboard')">Dashboard</button>
-        <button type="button" class="chip pj-tab" data-tab="lista" onclick="trocarAbaProjetosModulo('lista')">Projetos</button>
         <button type="button" class="chip pj-tab" data-tab="tarefas" onclick="trocarAbaProjetosModulo('tarefas')">Tarefas</button>
         <button type="button" class="chip pj-tab" data-tab="cronograma" onclick="trocarAbaProjetosModulo('cronograma')">Cronograma</button>
       </div>
 
-      <!-- Sub-aba: Dashboard -->
+      <!-- Sub-aba: Dashboard (inclui a lista de projetos) -->
       <div id="pjtab-dashboard" class="pj-tabcontent">
         <div id="alertaRespostasCliente" class="alertbox hidden"></div>
         <div class="grid cards4" id="dashProjetosStats" style="margin-bottom:28px;"></div>
-        <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:20px;">
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;margin-bottom:32px;">
           <div class="card">
             <p class="label" style="margin-bottom:10px;">Próximas entregas</p>
             <div id="dashProximasEntregas"></div>
@@ -201,17 +200,21 @@
             <div id="dashTarefasAtrasadas"></div>
           </div>
           <div class="card">
+            <p class="label" style="color:var(--sage);margin-bottom:10px;">Em andamento agora</p>
+            <div id="dashEmAndamento"></div>
+          </div>
+          <div class="card">
             <p class="label" style="color:var(--terracotta);margin-bottom:10px;">Respostas de clientes</p>
             <div id="dashRespostasCliente"></div>
           </div>
         </div>
-      </div>
 
-      <!-- Sub-aba: Projetos (cards) -->
-      <div id="pjtab-lista" class="pj-tabcontent hidden">
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
-          <button class="btn" onclick="toggleForm('formNovoProjeto')">+ Novo projeto</button>
-          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" id="btnVerModelos" onclick="alternarVisaoModelos()">Ver projetos-modelo</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+          <p class="label mono" style="margin:0;">Projetos</p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn" onclick="toggleForm('formNovoProjeto')">+ Novo projeto</button>
+            <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" id="btnVerModelos" onclick="alternarVisaoModelos()">Ver projetos-modelo</button>
+          </div>
         </div>
         <form id="formNovoProjeto" class="form-box hidden" onsubmit="criarProjeto(event)">
           <input id="npNome" required placeholder="Nome do projeto" />
@@ -545,6 +548,8 @@
           <p class="muted" style="margin-top:0;">Uma tela simples e só-leitura pra esse cliente acompanhar o progresso e responder as aprovações abaixo, sem precisar de login.</p>
           <div id="portalClienteStatus"></div>
         </div>
+
+        <div id="blocoGaleria3D"></div>
 
         <p class="muted" style="max-width:600px;">Peça o aceite do cliente pra briefing, estudo preliminar, executivo ou imagens 3D — ele responde direto pelo link dele acima, aprovando ou pedindo ajuste com um comentário.</p>
         <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaAprovacao')">+ Pedir aprovação</button>

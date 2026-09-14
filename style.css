@@ -172,8 +172,10 @@
   .search-empty{padding:14px;font-size:13px;color:var(--graphite);}
 
   /* Cronograma (Gantt) */
-  .gantt-months{display:flex;position:relative;height:22px;margin-left:190px;border-bottom:1px solid var(--line);margin-bottom:4px;}
+  .gantt-months{display:flex;position:relative;height:22px;margin-left:190px;border-bottom:1px solid var(--line);margin-bottom:0;}
   .gantt-month-tick{position:absolute;top:0;font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;color:var(--graphite);border-left:1px solid var(--line);padding-left:5px;height:100%;}
+  .gantt-days{display:flex;position:relative;height:16px;margin-left:190px;margin-bottom:6px;}
+  .gantt-day-tick{position:absolute;top:0;font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--graphite);opacity:.7;transform:translateX(-50%);}
   .gantt-row{display:flex;align-items:center;padding:7px 0;border-bottom:1px solid var(--paper);}
   .gantt-row-label{width:190px;flex-shrink:0;padding-right:12px;}
   .gantt-row-label p{margin:0;font-size:13px;}
@@ -338,3 +340,8 @@
   .briefing-pergunta textarea:focus{outline:none;border-color:var(--terracotta);}
   .briefing-resumo-card{display:flex;align-items:center;gap:16px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:20px;}
   .briefing-resumo-pct{font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:var(--terracotta);}
+
+  /* Galeria de Imagens 3D (reúne as imagens já enviadas nas aprovações) */
+  .galeria3d-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;}
+  .galeria3d-item{border-radius:10px;aspect-ratio:1;background-size:cover;background-position:center;cursor:pointer;position:relative;overflow:hidden;}
+  .galeria3d-item span{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.6));color:#fff;font-size:10.5px;padding:12px 8px 6px;}

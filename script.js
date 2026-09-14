@@ -142,7 +142,7 @@ function fecharMenuMobile(){
 
 function acaoRapida(view, formId){
   if(view==='projetos'){
-    navigate('projetos', { subaba: 'lista' });
+    navigate('projetos', { subaba: 'dashboard' });
   } else if(view==='tarefas'){
     navigate('projetos', { subaba: 'tarefas' });
   } else {
@@ -151,12 +151,11 @@ function acaoRapida(view, formId){
   setTimeout(() => toggleForm(formId, true), 150);
 }
 
-/* ---- Módulo Projetos: Dashboard / Projetos / Tarefas ---- */
+/* ---- Módulo Projetos: Dashboard (com lista de projetos) / Tarefas / Cronograma ---- */
 function trocarAbaProjetosModulo(tab){
   document.querySelectorAll('.pj-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'pjtab-'+tab));
   document.querySelectorAll('.pj-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
-  if(tab==='dashboard') loadDashboardProjetos();
-  if(tab==='lista') loadProjetos();
+  if(tab==='dashboard'){ loadDashboardProjetos(); loadProjetos(); }
   if(tab==='tarefas') loadTarefas();
   if(tab==='cronograma') loadCronograma();
 }
@@ -212,6 +211,14 @@ async function loadDashboardProjetos(){
       <div class="quicklink-item" style="cursor:pointer;" onclick="navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})">
         <span>${esc(t.titulo)} <span class="sub" style="color:var(--graphite);">· ${esc(t.projetos?.nome||'')}</span></span>
         <span class="badge alert">${fmtDataBR(t.prazo)}</span>
+      </div>`).join('');
+
+  const emAndamentoAgora = (tarefas||[]).filter(t => t.status==='em_andamento');
+  document.getElementById('dashEmAndamento').innerHTML = emAndamentoAgora.length===0
+    ? '<p class="muted" style="font-size:13px;">Nada em andamento agora.</p>'
+    : emAndamentoAgora.slice(0,7).map(t => `
+      <div class="quicklink-item" style="cursor:pointer;" onclick="navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})">
+        <span>${esc(t.titulo)} <span class="sub" style="color:var(--graphite);">· ${esc(t.projetos?.nome||'')}</span></span>
       </div>`).join('');
 
   document.getElementById('dashRespostasCliente').innerHTML = (respostasCliente||[]).length===0
@@ -603,7 +610,7 @@ function trocarAbaProjeto(tab){
   if(tab==='atas') loadAtas();
   if(tab==='briefing') loadBriefing();
   if(tab==='checklist') loadChecklistRevisao();
-  if(tab==='aprovacoes') loadAprovacoes();
+  if(tab==='aprovacoes'){ loadAprovacoes(); loadGaleria3D(); }
 }
 
 async function loadProjetoDetalhe(projetoId, abaAlvo){
@@ -1258,7 +1265,7 @@ async function loadTarefas(){
   ).join('');
 
   const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }, { data: todasEtapas }] = await Promise.all([
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,etapa_id,ambiente_id,projetos(nome),ambientes(nome)').order('criado_em',{ascending:true}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,etapa_id,ambiente_id,ordem_manual,projetos(nome),ambientes(nome)').order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id,equipe(nome)'),
     sb.from('tarefas_tempo').select('id,tarefa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
     sb.from('etapas').select('id,nome'),
@@ -1404,7 +1411,10 @@ function renderKanbanTarefas(){
                   <button class="timer-go" onclick="iniciarCronometro('${t.id}')">▶ Iniciar</button>
                 </div>
               </div>`}
-          <button class="btn-ghost" style="font-size:11.5px;padding:0;margin-bottom:8px;" onclick="abrirModalEditarTarefa('${t.id}')">ver tempo registrado</button>
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+            <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="abrirModalEditarTarefa('${t.id}')">ver tempo registrado</button>
+            <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="trazerTarefaParaTopo('${t.id}')">▲ pro topo</button>
+          </div>
           <div class="move-row">
             ${STATUS_TAREFA.filter(c=>c.status!==col.status).map(c => `<button onclick="moverTarefaKanban('${t.id}','${c.status}')">→ ${c.label}</button>`).join('')}
           </div>
@@ -1529,6 +1539,12 @@ async function iniciarCronometro(tarefaId){
   }
   const resultado = await sb.from('tarefas_tempo').insert({ tarefa_id: tarefaId, equipe_id: equipeId, inicio: new Date().toISOString() });
   if(checarErro(resultado, 'iniciar cronômetro')) return;
+  // Já que você começou a trabalhar nela agora, ela sobe pro topo da coluna sozinha
+  await sb.from('tarefas').update({ ordem_manual: -Date.now() }).eq('id', tarefaId);
+  loadTarefas();
+}
+async function trazerTarefaParaTopo(tarefaId){
+  await sb.from('tarefas').update({ ordem_manual: -Date.now() }).eq('id', tarefaId);
   loadTarefas();
 }
 async function pararCronometro(tempoId){
@@ -2268,6 +2284,7 @@ function montarGantt(itens, minDate, maxDate){
   const totalDias = Math.max(1, diasEntre(minDate, maxDate));
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const pctHoje = ((diasEntre(minDate, hoje) / totalDias) * 100).toFixed(2);
+  const diaLarguraPct = 100 / totalDias;
 
   // Marcadores de mês
   const meses = [];
@@ -2276,6 +2293,16 @@ function montarGantt(itens, minDate, maxDate){
     const pct = Math.max(0, (diasEntre(minDate, cursor) / totalDias) * 100);
     meses.push({ label: `${MESES[cursor.getMonth()].slice(0,3)}/${String(cursor.getFullYear()).slice(2)}`, pct });
     cursor = new Date(cursor.getFullYear(), cursor.getMonth()+1, 1);
+  }
+
+  // Marcadores de dia: todo dia se o período for curto, senão só de 7 em 7 (semanal)
+  const passoDias = totalDias <= 45 ? 1 : totalDias <= 120 ? 7 : null;
+  const dias = [];
+  if(passoDias){
+    for(let d = 0; d <= totalDias; d += passoDias){
+      const data = new Date(minDate); data.setDate(data.getDate() + d);
+      dias.push({ label: String(data.getDate()), pct: (d / totalDias) * 100 });
+    }
   }
 
   const linhasHtml = itens.map(item => {
@@ -2288,7 +2315,7 @@ function montarGantt(itens, minDate, maxDate){
         <p>${esc(item.nome)}</p>
         <span>${item.sub ? esc(item.sub) : ''}</span>
       </div>
-      <div class="gantt-track">
+      <div class="gantt-track" style="background-image:repeating-linear-gradient(to right, var(--line) 0, var(--line) 1px, transparent 1px, transparent ${diaLarguraPct}%);">
         <div class="gantt-today" style="left:${pctHoje}%;"></div>
         <div class="gantt-bar" title="${esc(item.nome)}: ${item.inicio.toLocaleDateString('pt-BR')} a ${item.fim.toLocaleDateString('pt-BR')}" style="left:${inicioPct}%;width:${largura}%;background:${cor};"></div>
       </div>
@@ -2297,6 +2324,7 @@ function montarGantt(itens, minDate, maxDate){
 
   cont.innerHTML = `
     <div class="gantt-months">${meses.map(m => `<span class="gantt-month-tick" style="left:${m.pct}%;">${m.label}</span>`).join('')}</div>
+    ${dias.length>0 ? `<div class="gantt-days">${dias.map(d => `<span class="gantt-day-tick" style="left:${d.pct}%;">${d.label}</span>`).join('')}</div>` : ''}
     ${linhasHtml}
   `;
 }
@@ -3073,6 +3101,34 @@ function ajustarTituloAprovacao(){
   }
 }
 
+async function loadGaleria3D(){
+  const cont = document.getElementById('blocoGaleria3D');
+  const { data: aprovacoes3d } = await sb
+    .from('aprovacoes_cliente')
+    .select('id,titulo,data_resposta,aprovacao_imagens(url)')
+    .eq('projeto_id', projetoAtualId)
+    .eq('tipo', 'imagens_3d')
+    .order('criado_em', { ascending: false });
+
+  const imagens = [];
+  (aprovacoes3d||[]).forEach(a => {
+    (a.aprovacao_imagens||[]).forEach(img => imagens.push({ url: img.url, titulo: a.titulo }));
+  });
+
+  if(imagens.length===0){ cont.innerHTML = ''; return; }
+
+  cont.innerHTML = `
+    <div class="card" style="margin-bottom:20px;">
+      <p class="label" style="margin-bottom:12px;">Galeria de Imagens 3D <span class="muted" style="font-weight:400;">(${imagens.length})</span></p>
+      <div class="galeria3d-grid">
+        ${imagens.map(img => `
+          <div class="galeria3d-item" style="background-image:url('${esc(img.url)}');" onclick="window.open('${esc(img.url)}','_blank')">
+            <span>${esc(img.titulo)}</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
 async function loadAprovacoes(){
   const [{ data: aprovacoes }, { data: etapas }] = await Promise.all([
     sb.from('aprovacoes_cliente').select('id,tipo,titulo,descricao,status,comentario_cliente,data_resposta,criado_em,visto_pela_equipe,etapa_id,eh_checklist,etapas(nome),aprovacao_imagens(url),aprovacao_checklist_itens(id,item,marcado)').eq('projeto_id', projetoAtualId).order('criado_em', { ascending: false }),
@@ -3405,17 +3461,6 @@ function abrirAta(id){
 
 /* ================= BRIEFING DO PROJETO ================= */
 const BRIEFING_TEMPLATE = [
-  ["Dados do Cliente", null, [
-    "Nome Completo",
-    "Telefone",
-    "E-mail",
-    "Tipo de Imóvel (Casa / Apartamento / Terreno / Comercial)",
-    "Área de Projeto",
-    "Endereço da obra",
-    "Situação do Imóvel (terreno vazio, terreno com construção, com construção existente, etc)",
-    "Projeto será executado em etapas ou de uma vez?",
-    "Programa de Necessidades (quantidade de cômodos, ambientes, vagas de garagem, área de lazer, etc)",
-  ]],
   ["Estilo de Vida dos Moradores", "Perfil dos moradores", [
     "Quantas pessoas moram na casa?",
     "Idade dos moradores?",
@@ -3801,7 +3846,7 @@ async function loadBriefing(){
     cont.innerHTML = `<div class="card" style="max-width:560px;">
       <p class="label">Briefing</p>
       <p class="muted" style="margin-top:0;">As mesmas ${BRIEFING_TEMPLATE.reduce((s,g)=>s+g[2].length,0)} perguntas do formulário que vocês já usam, organizadas por seção — preenche aqui e fica salvo automaticamente, sem precisar da planilha.</p>
-      <button class="btn" onclick="iniciarBriefing()">+ Iniciar briefing</button>
+      <button class="btn" onclick="abrirSelecaoBriefing()">+ Iniciar briefing</button>
     </div>`;
     return;
   }
@@ -3852,9 +3897,10 @@ async function loadBriefing(){
         <span class="checklist-ambiente-count ${respondidasSecao===itensSecao.length?'completo':''}">${respondidasSecao}/${itensSecao.length}</span>
       </summary>
       <div class="checklist-ambiente-corpo">
-        <div style="display:flex;gap:14px;margin-bottom:10px;">
+        <div style="display:flex;gap:14px;margin-bottom:10px;flex-wrap:wrap;">
           <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="adicionarPerguntaBriefing('${secao.replace(/'/g,"\\'")}', null)">+ pergunta</button>
           <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="duplicarSecaoBriefing('${secao.replace(/'/g,"\\'")}')">⧉ duplicar seção</button>
+          <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="renomearSecaoBriefing('${secao.replace(/'/g,"\\'")}')">renomear seção</button>
         </div>
         ${subgrupos.map(sg => `
           ${sg!=='_' ? `<p class="rev-subgrupo-titulo" style="margin-top:10px;">${esc(sg)}</p>` : ''}
@@ -3903,16 +3949,48 @@ function imprimirBriefing(){
   janela.document.close();
 }
 
-async function iniciarBriefing(){
+function abrirSelecaoBriefing(){
+  const html = `
+    <p class="label" style="margin-bottom:6px;">Quais seções esse projeto precisa?</p>
+    <p class="muted" style="margin-top:0;margin-bottom:14px;">Desmarca o que não se aplica (ex: apartamento não tem Fachada nem Jardim Externo) — dá pra ajustar depois também.</p>
+    <div id="listaSelecaoBriefing" style="max-height:320px;overflow-y:auto;margin-bottom:16px;"></div>
+    <div class="form-actions">
+      <button class="btn" onclick="confirmarIniciarBriefing()">Gerar briefing com as seções marcadas</button>
+      <button class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+    </div>
+  `;
+  abrirModal(html);
+  const secoesUnicas = [...new Set(BRIEFING_TEMPLATE.map(g => g[0]))];
+  document.getElementById('listaSelecaoBriefing').innerHTML = secoesUnicas.map(s => `
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13.5px;">
+      <input type="checkbox" class="check-secao-briefing" value="${esc(s)}" checked style="width:16px;height:16px;accent-color:var(--terracotta);" />
+      ${esc(s)}
+    </label>`).join('');
+}
+
+async function confirmarIniciarBriefing(){
+  const secoesEscolhidas = Array.from(document.querySelectorAll('.check-secao-briefing:checked')).map(c => c.value);
+  if(secoesEscolhidas.length===0){ alert('Marca pelo menos uma seção.'); return; }
+
   let ordem = 0;
   const linhas = [];
   BRIEFING_TEMPLATE.forEach(([secao, subgrupo, perguntas]) => {
+    if(!secoesEscolhidas.includes(secao)) return;
     perguntas.forEach(pergunta => {
       linhas.push({ projeto_id: projetoAtualId, secao, subgrupo, pergunta, ordem: ordem++ });
     });
   });
   const resultado = await sb.from('briefing_respostas').insert(linhas);
   if(checarErro(resultado, 'iniciar briefing')) return;
+  fecharModalEditar();
+  loadBriefing();
+}
+
+async function renomearSecaoBriefing(secaoAtual){
+  const novoNome = prompt('Novo nome pra essa seção:', secaoAtual);
+  if(!novoNome || !novoNome.trim() || novoNome.trim()===secaoAtual) return;
+  const resultado = await sb.from('briefing_respostas').update({ secao: novoNome.trim() }).eq('projeto_id', projetoAtualId).eq('secao', secaoAtual);
+  if(checarErro(resultado, 'renomear seção')) return;
   loadBriefing();
 }
 
