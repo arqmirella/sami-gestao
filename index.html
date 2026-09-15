@@ -55,11 +55,13 @@
         <button class="navbtn" data-view="conteudo" onclick="navigate('conteudo')">Conteúdo</button>
         <button class="navbtn" data-view="financeiro" onclick="navigate('financeiro')">Financeiro</button>
         <button class="navbtn" data-view="fornecedores" onclick="navigate('fornecedores')">Fornecedores</button>
-        <button class="navbtn" data-view="orcamentos" onclick="navigate('orcamentos')">Orçamentos</button>
         <button class="navbtn" data-view="equipe" onclick="navigate('equipe')">Equipe</button>
       </nav>
     </div>
-    <button class="btn-ghost mono" style="text-transform:uppercase;font-size:12px;" onclick="handleLogout()">Sair</button>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <button class="btn-ghost mono" style="text-transform:uppercase;font-size:11px;color:var(--graphite);" onclick="exportarBackup()">Baixar backup</button>
+      <button class="btn-ghost mono" style="text-transform:uppercase;font-size:12px;" onclick="handleLogout()">Sair</button>
+    </div>
   </aside>
 
   <main>
@@ -72,107 +74,135 @@
 
     <!-- INÍCIO -->
     <section id="view-inicio">
-      <div class="grid inicio-top-grid" style="grid-template-columns:0.85fr 1fr auto;align-items:stretch;margin-bottom:24px;">
-        <div class="hero hero-compact">
-          <div>
-            <p class="mono" id="heroDia" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;opacity:.85;"></p>
-            <p class="time" id="heroHora"></p>
-            <p id="heroData" style="font-size:13px;opacity:.9;margin:0;"></p>
-          </div>
-          <p id="heroResumo" style="font-size:12px;opacity:.85;margin:14px 0 0;"></p>
+
+      <div class="saudacao">
+        <div>
+          <h1 id="heroDia">Olá</h1>
+          <p class="resumo" id="heroResumo"></p>
         </div>
-        <div class="card cal-compact">
-          <div class="cal-head">
-            <p class="display" id="calTitulo" style="font-weight:600;margin:0;font-size:13.5px;"></p>
-            <div style="display:flex;gap:4px;">
-              <button class="navbtn-cal" onclick="mudarMes(-1)">‹</button>
-              <button class="navbtn-cal" onclick="mudarMes(1)">›</button>
+        <div class="relogio-bloco">
+          <div class="hora" id="heroHora"></div>
+          <div class="data" id="heroData"></div>
+        </div>
+      </div>
+
+      <div class="indicadores" id="indicadoresInicio"></div>
+
+      <div class="colunas-inicio">
+
+        <div>
+          <div class="bloco">
+            <div class="bloco-topo">
+              <h2>Tarefas de hoje</h2>
+              <button class="link-bloco" onclick="navigate('projetos',{subaba:'tarefas'})">abrir kanban</button>
+            </div>
+            <div class="card" id="tarefasHoje" style="padding:0;"></div>
+          </div>
+
+          <div class="bloco">
+            <div class="bloco-topo">
+              <h2>Próximos compromissos</h2>
+              <button class="link-bloco" onclick="toggleForm('formCompromisso')">novo compromisso</button>
+            </div>
+            <form id="formCompromisso" class="form-box hidden" onsubmit="criarCompromisso(event)">
+              <input id="cpTitulo" required placeholder="Título (ex: Visita técnica)" />
+              <select id="cpProjeto"></select>
+              <input id="cpDataHora" type="datetime-local" required />
+              <input id="cpLocal" placeholder="Local (opcional)" />
+              <div class="form-actions">
+                <button type="submit" class="btn">Salvar compromisso</button>
+                <button type="button" class="btn-ghost" onclick="toggleForm('formCompromisso', false)">Cancelar</button>
+              </div>
+            </form>
+            <div class="card" id="listaCompromissos" style="padding:0;"></div>
+          </div>
+
+          <div class="bloco">
+            <div class="bloco-topo">
+              <h2>Projetos em andamento</h2>
+              <button class="link-bloco" onclick="navigate('projetos')">ver todos</button>
+            </div>
+            <div class="grid projetos-grid" id="resumoProjetos"></div>
+          </div>
+
+          <div class="bloco">
+            <div class="bloco-topo"><h2>Calendário</h2></div>
+            <div class="card">
+              <div class="cal-head">
+                <p class="display" id="calTitulo" style="font-weight:600;margin:0;"></p>
+                <div style="display:flex;gap:4px;">
+                  <button class="navbtn-cal" onclick="mudarMes(-1)">‹</button>
+                  <button class="navbtn-cal" onclick="mudarMes(1)">›</button>
+                </div>
+              </div>
+              <div class="cal-grid" style="margin-bottom:4px;">
+                <span class="cal-dow">D</span><span class="cal-dow">S</span><span class="cal-dow">T</span><span class="cal-dow">Q</span><span class="cal-dow">Q</span><span class="cal-dow">S</span><span class="cal-dow">S</span>
+              </div>
+              <div class="cal-grid" id="calGrid"></div>
             </div>
           </div>
-          <div class="cal-grid" style="margin-bottom:2px;">
-            <span class="cal-dow">D</span><span class="cal-dow">S</span><span class="cal-dow">T</span><span class="cal-dow">Q</span><span class="cal-dow">Q</span><span class="cal-dow">S</span><span class="cal-dow">S</span>
+        </div>
+
+        <div>
+          <div class="bloco">
+            <div class="bloco-topo"><h2>Mural de recados</h2></div>
+            <div class="card" style="padding:0;">
+              <div id="listaRecados"></div>
+              <form id="formRecado" class="campo-recado" onsubmit="enviarRecado(event)">
+                <input id="rcAutor" required placeholder="Seu nome" style="max-width:110px;" />
+                <input id="rcTexto" required placeholder="Deixe um recado..." />
+                <button type="submit" class="btn" style="padding:8px 16px;">Enviar</button>
+              </form>
+            </div>
           </div>
-          <div class="cal-grid" id="calGrid"></div>
-        </div>
-        <div class="quick-actions">
-          <button class="qa-btn" onclick="acaoRapida('projetos','formNovoProjeto')"><span>+</span> Novo projeto</button>
-          <button class="qa-btn" onclick="acaoRapida('clientes','formNovoCliente')"><span>+</span> Novo cliente</button>
-          <button class="qa-btn" onclick="navigate('projetos',{subaba:'tarefas'})"><span>→</span> Ver tarefas</button>
-          <button class="qa-btn" onclick="acaoRapida('conteudo','formNovoConteudo')"><span>+</span> Novo conteúdo</button>
-        </div>
-      </div>
 
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <p class="label mono" style="margin:0;">Mural de recados</p>
-      </div>
-      <form id="formRecado" class="form-box" style="max-width:520px;" onsubmit="enviarRecado(event)">
-        <input id="rcAutor" required placeholder="Seu nome" />
-        <textarea id="rcTexto" required placeholder="Deixe um recado pra equipe..." rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
-        <button type="submit" class="btn">Enviar</button>
-      </form>
-      <div id="listaRecados" style="margin-bottom:32px;"></div>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <p class="label mono" style="margin:0;">Compromissos</p>
-        <button class="btn" onclick="toggleForm('formCompromisso')">+ Novo compromisso</button>
-      </div>
-      <form id="formCompromisso" class="form-box hidden" onsubmit="criarCompromisso(event)">
-        <input id="cpTitulo" required placeholder="Título (ex: Visita técnica)" />
-        <select id="cpProjeto"></select>
-        <input id="cpDataHora" type="datetime-local" required />
-        <input id="cpLocal" placeholder="Local (opcional)" />
-        <div class="form-actions">
-          <button type="submit" class="btn">Salvar compromisso</button>
-          <button type="button" class="btn-ghost" onclick="toggleForm('formCompromisso', false)">Cancelar</button>
-        </div>
-      </form>
-      <div class="card" id="listaCompromissos" style="padding:0;margin-bottom:32px;"></div>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <p class="label mono" style="margin:0;">Tarefas de hoje</p>
-        <button class="btn-ghost mono" style="font-size:12px;text-transform:uppercase;padding:0;" onclick="navigate('projetos',{subaba:'tarefas'})">ver todas ›</button>
-      </div>
-      <div class="card" id="tarefasHoje" style="padding:0;margin-bottom:32px;"></div>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <p class="label mono" style="margin:0;">Próximos aniversários</p>
-      </div>
-      <div class="card" id="proximosAniversarios" style="padding:0;margin-bottom:32px;"></div>
-
-      <div id="blocoGoogleAgenda" style="margin-bottom:32px;"></div>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <p class="label mono" style="margin:0;">Projetos em andamento</p>
-        <button class="btn-ghost mono" style="font-size:12px;text-transform:uppercase;padding:0;" onclick="navigate('projetos')">ver todos ›</button>
-      </div>
-      <div class="grid projetos-grid" id="resumoProjetos" style="margin-bottom:32px;"></div>
-
-      <div class="grid" style="grid-template-columns:1fr 1fr;gap:20px;">
-        <div class="card">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <p class="label" style="margin:0;">Redes sociais</p>
-            <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="toggleForm('formLinkRede')">+ adicionar</button>
+          <div class="bloco">
+            <div class="bloco-topo"><h2>Aniversários do mês</h2></div>
+            <div class="card" id="proximosAniversarios" style="padding:0;"></div>
           </div>
-          <form id="formLinkRede" class="hidden" style="margin-bottom:12px;" onsubmit="criarLinkRapido(event,'rede_social')">
-            <input id="lrNomeRede" required placeholder="Nome (ex: Instagram)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:6px;" />
-            <input id="lrUrlRede" required placeholder="Link (https://...)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:6px;" />
-            <button class="btn" style="width:100%;">Salvar link</button>
-          </form>
-          <div id="listaLinksRede" class="quicklinks-grid"></div>
+
+          <div class="bloco">
+            <div class="bloco-topo"><h2>Começar agora</h2></div>
+            <div class="atalhos">
+              <button class="atalho" onclick="acaoRapida('projetos','formNovoProjeto')">Novo projeto</button>
+              <button class="atalho" onclick="acaoRapida('clientes','formNovoCliente')">Novo cliente</button>
+              <button class="atalho" onclick="acaoRapida('tarefas','formNovaTarefa')">Nova tarefa</button>
+              <button class="atalho" onclick="acaoRapida('conteudo','formNovoConteudo')">Novo conteúdo</button>
+            </div>
+          </div>
+
+          <div class="bloco">
+            <div class="bloco-topo">
+              <h2>Links rápidos</h2>
+              <button class="link-bloco" onclick="toggleForm('formLinkRede')">+ rede</button>
+            </div>
+            <div class="card">
+              <form id="formLinkRede" class="hidden" style="display:flex;gap:6px;margin-bottom:10px;" onsubmit="criarLinkRapido(event,'rede_social')">
+                <input id="lrNomeRede" required placeholder="Nome" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:7px 9px;" />
+                <input id="lrUrlRede" required placeholder="Link" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:7px 9px;" />
+                <button class="btn" style="padding:7px 12px;">ok</button>
+              </form>
+              <div id="listaLinksRede"></div>
+
+              <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px;">
+                <p class="label" style="margin:0;">Conhecimento</p>
+                <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="toggleForm('formLinkConhecimento')">+ link</button>
+              </div>
+              <form id="formLinkConhecimento" class="hidden" style="display:flex;gap:6px;margin-bottom:10px;" onsubmit="criarLinkRapido(event,'conhecimento')">
+                <input id="lrNomeConhecimento" required placeholder="Nome" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:7px 9px;" />
+                <input id="lrUrlConhecimento" required placeholder="Link" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:7px 9px;" />
+                <button class="btn" style="padding:7px 12px;">ok</button>
+              </form>
+              <div id="listaLinksConhecimento"></div>
+            </div>
+          </div>
+
+          <div class="bloco">
+            <div class="bloco-topo"><h2>Agenda do Google</h2></div>
+            <div id="blocoGoogleAgenda"></div>
+          </div>
         </div>
 
-        <div class="card">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <p class="label" style="margin:0;">Conhecimento compartilhado</p>
-            <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="toggleForm('formLinkConhecimento')">+ adicionar</button>
-          </div>
-          <form id="formLinkConhecimento" class="hidden" style="margin-bottom:12px;" onsubmit="criarLinkRapido(event,'conhecimento')">
-            <input id="lrNomeConhecimento" required placeholder="Nome (ex: Guia de Materiais)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:6px;" />
-            <input id="lrUrlConhecimento" required placeholder="Link (https://...)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:6px;" />
-            <button class="btn" style="width:100%;">Salvar link</button>
-          </form>
-          <div id="listaLinksConhecimento"></div>
-        </div>
       </div>
     </section>
 
@@ -184,6 +214,7 @@
         <button type="button" class="chip pj-tab on" data-tab="dashboard" onclick="trocarAbaProjetosModulo('dashboard')">Dashboard</button>
         <button type="button" class="chip pj-tab" data-tab="tarefas" onclick="trocarAbaProjetosModulo('tarefas')">Tarefas</button>
         <button type="button" class="chip pj-tab" data-tab="cronograma" onclick="trocarAbaProjetosModulo('cronograma')">Cronograma</button>
+        <button type="button" class="chip pj-tab" data-tab="orcamentos" onclick="trocarAbaProjetosModulo('orcamentos')">Orçamentos</button>
       </div>
 
       <!-- Sub-aba: Dashboard (inclui a lista de projetos) -->
@@ -289,6 +320,28 @@
         <div class="card" id="ganttContainer" style="overflow-x:auto;"></div>
         <p class="muted" id="ganttAviso" style="font-size:12.5px;margin-top:10px;"></p>
       </div>
+
+      <!-- Sub-aba: Orçamentos (todos os projetos) -->
+      <div id="pjtab-orcamentos" class="pj-tabcontent hidden">
+        <div class="grid" style="grid-template-columns:repeat(2,1fr);max-width:480px;margin-bottom:24px;" id="orcamentosResumo"></div>
+        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formOrcamento')">+ Novo orçamento</button>
+        <form id="formOrcamento" class="form-box hidden" onsubmit="criarOrcamento(event)">
+          <select id="ocProjeto"></select>
+          <select id="ocFornecedor"></select>
+          <input id="ocDescricao" placeholder="Descrição (ex: Marcenaria sob medida)" />
+          <input id="ocValor" required placeholder="Valor" />
+          <div class="form-actions">
+            <button type="submit" class="btn">Salvar orçamento</button>
+            <button type="button" class="btn-ghost" onclick="toggleForm('formOrcamento', false)">Cancelar</button>
+          </div>
+        </form>
+        <div class="card" style="padding:0;">
+          <table>
+            <thead><tr><th>Descrição / Projeto</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+            <tbody id="tabelaOrcamentos"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <!-- DETALHE DO PROJETO -->
@@ -317,6 +370,7 @@
 
           <p class="pd-nav-group">Financeiro</p>
           <button type="button" class="pd-tab" data-tab="orcamentos" onclick="trocarAbaProjeto('orcamentos')">Orçamentos</button>
+          <button type="button" class="pd-tab" data-tab="contrato" onclick="trocarAbaProjeto('contrato')">Contrato</button>
 
           <p class="pd-nav-group">Obra</p>
           <button type="button" class="pd-tab" data-tab="visitas" onclick="trocarAbaProjeto('visitas')">Visitas</button>
@@ -483,6 +537,50 @@
         <div id="listaOrcamentosProjeto"></div>
       </div>
 
+      <!-- Sub-aba: Contrato -->
+      <div id="pdtab-contrato" class="pd-tabcontent hidden">
+        <p class="muted" style="max-width:620px;">Preenche os dados desse contrato — o texto jurídico (cláusulas fixas) já vem pronto igual ao modelo padrão. A forma de pagamento (Cláusula 4) é puxada automaticamente das parcelas já lançadas em Financeiro pra esse projeto.</p>
+        <form id="formContrato" class="form-box" style="max-width:620px;" onsubmit="salvarEImprimirContrato(event)">
+          <input id="ctNumero" placeholder="Número do contrato (ex: 94)" style="max-width:220px;" />
+          <p class="label">Contratante</p>
+          <input id="ctNome" required placeholder="Nome completo do cliente" />
+          <div style="display:flex;gap:8px;">
+            <input id="ctCpf" placeholder="CPF" style="flex:1;" />
+            <input id="ctRg" placeholder="RG" style="flex:1;" />
+          </div>
+
+          <p class="label" style="margin-top:14px;">Cláusula 1ª — Do objeto</p>
+          <textarea id="ctDescricaoObjeto" rows="2" placeholder="Ex: elaboração de projeto de reforma e de interiores, para uma casa com cerca de 130m² em um terreno de 300m², situado em..." style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
+
+          <p class="label" style="margin-top:14px;">Cláusula 2ª — Escopo do serviço</p>
+          <textarea id="ctEscopo" rows="8" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;font-size:12.5px;"></textarea>
+
+          <p class="label" style="margin-top:14px;">Cláusula 3ª — Honorários</p>
+          <div style="display:flex;gap:8px;">
+            <input id="ctValorHonorarios" required placeholder="Valor total (ex: 9.920,00)" style="flex:1;" />
+            <input id="ctValorRRT" placeholder="Valor do RRT (ex: 675,00)" style="flex:1;" />
+          </div>
+
+          <p class="label" style="margin-top:14px;">Cláusula 8ª — Prazos (dias úteis)</p>
+          <div style="display:flex;gap:8px;">
+            <input id="ctPrazoEP" type="number" value="14" placeholder="Estudo Preliminar" style="flex:1;" title="Estudo Preliminar" />
+            <input id="ctPrazoAP" type="number" value="25" placeholder="Anteprojeto" style="flex:1;" title="Anteprojeto" />
+            <input id="ctPrazoPE" type="number" value="30" placeholder="Executivo" style="flex:1;" title="Projeto Executivo" />
+          </div>
+
+          <p class="label" style="margin-top:14px;">Assinatura</p>
+          <div style="display:flex;gap:8px;">
+            <input id="ctCidadeForo" value="Jundiaí" placeholder="Cidade do foro" style="flex:1;" />
+            <input id="ctDataContrato" type="date" style="flex:1;" />
+          </div>
+
+          <div class="form-actions" style="margin-top:16px;">
+            <button type="submit" class="btn">Gerar contrato (PDF)</button>
+          </div>
+        </form>
+        <div id="listaContratos" style="margin-top:20px;"></div>
+      </div>
+
       <!-- Sub-aba: Visitas -->
       <div id="pdtab-visitas" class="pd-tabcontent hidden">
         <form onsubmit="adicionarVisita(event)" class="form-box" style="max-width:560px;">
@@ -552,13 +650,20 @@
         <div id="blocoGaleria3D"></div>
 
         <p class="muted" style="max-width:600px;">Peça o aceite do cliente pra briefing, estudo preliminar, executivo ou imagens 3D — ele responde direto pelo link dele acima, aprovando ou pedindo ajuste com um comentário.</p>
-        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaAprovacao')">+ Pedir aprovação</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+          <button class="btn" onclick="toggleForm('formNovaAprovacao')">+ Pedir aprovação</button>
+          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="abrirGeradorTermoAnteprojeto()">⧉ Gerar Termo de Anteprojeto</button>
+          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="abrirGeradorTermoFinalizacao()">⧉ Gerar Termo de Finalização</button>
+        </div>
         <form id="formNovaAprovacao" class="form-box hidden" onsubmit="criarAprovacao(event)">
           <select id="apTipo" onchange="ajustarTituloAprovacao()">
             <option value="briefing">Briefing</option>
             <option value="estudo_preliminar">Estudo Preliminar</option>
             <option value="executivo">Projeto Executivo</option>
             <option value="imagens_3d">Imagens 3D</option>
+            <option value="dados_contrato">Dados para o contrato</option>
+            <option value="termo_anteprojeto">Termo de Anteprojeto</option>
+            <option value="termo_finalizacao">Termo de Finalização</option>
             <option value="outro">Outro</option>
           </select>
           <input id="apTitulo" required placeholder="Título (ex: Aprovação do Estudo Preliminar)" />
@@ -614,6 +719,33 @@
 
           <button class="btn">Salvar dados</button>
         </form>
+
+        <div class="card" style="max-width:560px;margin-top:20px;">
+          <p class="label">Documentos de encerramento do projeto</p>
+          <p class="muted" style="margin-top:0;">Gerados a partir dos dados já cadastrados desse cliente e projeto.</p>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line);">
+            <div>
+              <p style="margin:0;font-size:13.5px;">Termo de Aceite Final</p>
+              <p class="mono" id="statusTermoFinal" style="font-size:11px;text-transform:uppercase;margin:2px 0 0;"></p>
+            </div>
+            <div style="display:flex;gap:10px;">
+              <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="gerarTermoFinal()">gerar / ver</button>
+              <button class="btn-ghost" style="font-size:12px;color:var(--sage);padding:0;" id="btnMarcarTermoFinal" onclick="marcarTermoFinalAssinado()">marcar assinado</button>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;">
+            <div>
+              <p style="margin:0;font-size:13.5px;">Autorização de Uso de Imagem</p>
+              <p class="mono" id="statusAutorizacaoImagem" style="font-size:11px;text-transform:uppercase;margin:2px 0 0;"></p>
+            </div>
+            <div style="display:flex;gap:10px;">
+              <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="gerarAutorizacaoImagem()">gerar / ver</button>
+              <button class="btn-ghost" style="font-size:12px;color:var(--sage);padding:0;" id="btnMarcarAutorizacaoImagem" onclick="marcarAutorizacaoImagemAssinada()">marcar assinada</button>
+            </div>
+          </div>
+        </div>
       </div>
 
         </div>
@@ -674,7 +806,7 @@
           <button type="button" class="btn-ghost" onclick="toggleForm('formNovoCliente', false)">Cancelar</button>
         </div>
       </form>
-      <div class="grid" style="grid-template-columns:repeat(2,1fr);" id="gridClientes"></div>
+      <div class="card" style="padding:0;" id="gridClientes"></div>
     </section>
 
     <!-- DETALHE DO CLIENTE -->
@@ -682,7 +814,10 @@
       <button class="btn-ghost mono" style="font-size:12px;text-transform:uppercase;padding:0;margin-bottom:14px;" onclick="navigate('clientes')">‹ Voltar pra Clientes</button>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
         <h1 id="cdNome" style="margin:0;"></h1>
-        <button class="remove-link mono" style="text-transform:uppercase;" onclick="excluirClienteAtual()">Excluir cliente</button>
+        <div style="display:flex;gap:14px;align-items:center;">
+          <button class="btn-ghost mono" id="cdBotaoEditar" style="text-transform:uppercase;font-size:12px;padding:0;" onclick="ativarEdicaoCliente()">Editar</button>
+          <button class="remove-link mono" style="text-transform:uppercase;" onclick="excluirClienteAtual()">Excluir cliente</button>
+        </div>
       </div>
       <div class="card" id="cdConteudo"></div>
     </section>
@@ -691,6 +826,14 @@
     <section id="view-conteudo" class="hidden">
       <h1>Conteúdo</h1>
 
+      <div class="chip-select" style="margin-bottom:24px;">
+        <button type="button" class="chip ct-tab on" data-tab="planner" onclick="trocarAbaConteudo('planner')">Planner</button>
+        <button type="button" class="chip ct-tab" data-tab="roteiros" onclick="trocarAbaConteudo('roteiros')">Roteiros de vídeo</button>
+        <button type="button" class="chip ct-tab" data-tab="referencias" onclick="trocarAbaConteudo('referencias')">Referências</button>
+      </div>
+
+      <!-- Aba: Planner -->
+      <div id="cttab-planner" class="ct-tabcontent">
       <div class="card" style="margin-bottom:20px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
           <p class="label" style="margin:0;">Redes cadastradas</p>
@@ -739,7 +882,57 @@
           <div id="listaConteudo"></div>
         </div>
       </div>
+      </div>
 
+      <!-- Aba: Roteiros de vídeo -->
+      <div id="cttab-roteiros" class="ct-tabcontent hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+          <div class="chip-select" style="margin:0;" id="filtroStatusRoteiro">
+            <button type="button" class="chip on" data-fr="todos" onclick="filtrarRoteiros('todos')">Todos</button>
+            <button type="button" class="chip" data-fr="ideia" onclick="filtrarRoteiros('ideia')">Ideias</button>
+            <button type="button" class="chip" data-fr="roteiro" onclick="filtrarRoteiros('roteiro')">Roteiro pronto</button>
+            <button type="button" class="chip" data-fr="gravar" onclick="filtrarRoteiros('gravar')">Gravar</button>
+            <button type="button" class="chip" data-fr="editar" onclick="filtrarRoteiros('editar')">Editar</button>
+            <button type="button" class="chip" data-fr="pronto" onclick="filtrarRoteiros('pronto')">Pronto</button>
+          </div>
+          <button class="btn" onclick="toggleForm('formNovoRoteiro')">+ Nova ideia de vídeo</button>
+        </div>
+
+        <form id="formNovoRoteiro" class="form-box hidden" style="max-width:640px;" onsubmit="criarRoteiro(event)">
+          <input id="rtTitulo" required placeholder="Ideia do vídeo (ex: 5 erros que encarecem a reforma)" />
+          <div style="display:flex;gap:8px;">
+            <select id="rtFormato" style="flex:1;">
+              <option value="reels">Reels</option>
+              <option value="carrossel">Carrossel</option>
+              <option value="stories">Stories</option>
+              <option value="youtube">YouTube</option>
+              <option value="outro">Outro</option>
+            </select>
+            <select id="rtRede" style="flex:1;"><option value="">Sem rede definida</option></select>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <select id="rtProjeto" data-opcional="true" style="flex:1;"><option value="">Sem projeto vinculado</option></select>
+            <input id="rtDataPrevista" type="date" style="flex:1;" title="Quando pretende publicar" />
+          </div>
+          <textarea id="rtGancho" rows="2" placeholder="Gancho — os 3 primeiros segundos, o que prende a atenção" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
+          <textarea id="rtRoteiro" rows="6" placeholder="Roteiro — o que falar/mostrar, cena por cena" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
+          <textarea id="rtLegenda" rows="3" placeholder="Legenda do post" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
+          <div style="display:flex;gap:8px;">
+            <input id="rtHashtags" placeholder="#hashtags" style="flex:1;" />
+            <input id="rtTrilha" placeholder="Áudio / trilha" style="flex:1;" />
+          </div>
+          <input id="rtReferencia" placeholder="Link de referência (opcional)" />
+          <div class="form-actions">
+            <button type="submit" class="btn">Salvar roteiro</button>
+            <button type="button" class="btn-ghost" onclick="toggleForm('formNovoRoteiro', false)">Cancelar</button>
+          </div>
+        </form>
+
+        <div id="listaRoteiros"></div>
+      </div>
+
+      <!-- Aba: Referências -->
+      <div id="cttab-referencias" class="ct-tabcontent hidden">
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
           <p class="label" style="margin:0;">Painel de ideias / referências</p>
@@ -758,6 +951,7 @@
         </form>
         <div class="grid" style="grid-template-columns:repeat(4,1fr);" id="gridIdeias"></div>
       </div>
+      </div>
     </section>
 
     <!-- TAREFAS -->
@@ -774,9 +968,25 @@
       <!-- Sub-aba: Fluxo de caixa -->
       <div id="fintab-fluxo" class="fin-tabcontent">
         <div class="grid cards4" id="fluxoResumo" style="margin-bottom:24px;"></div>
-        <div class="chartbox">
+
+        <div class="card" style="margin-bottom:24px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <p class="label" style="margin:0;">Meta do mês</p>
+            <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="editarMetaMensal()">editar meta</button>
+          </div>
+          <div id="blocoMetaMensal"></div>
+        </div>
+
+        <div class="chartbox" style="margin-bottom:24px;">
           <p class="label">Entradas x Saídas por mês</p>
           <canvas id="chartFluxo" height="140"></canvas>
+        </div>
+
+        <div class="card" style="padding:0;">
+          <table>
+            <thead><tr><th>Mês</th><th>Entradas</th><th>Saídas</th><th>Lucro</th></tr></thead>
+            <tbody id="tabelaMensalFinanceiro"></tbody>
+          </table>
         </div>
       </div>
 
@@ -861,28 +1071,6 @@
     </section>
 
     <!-- ORÇAMENTOS -->
-    <section id="view-orcamentos" class="hidden">
-      <h1>Orçamentos</h1>
-      <div class="grid" style="grid-template-columns:repeat(2,1fr);max-width:480px;margin-bottom:24px;" id="orcamentosResumo"></div>
-      <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formOrcamento')">+ Novo orçamento</button>
-      <form id="formOrcamento" class="form-box hidden" onsubmit="criarOrcamento(event)">
-        <select id="ocProjeto"></select>
-        <select id="ocFornecedor"></select>
-        <input id="ocDescricao" placeholder="Descrição (ex: Marcenaria sob medida)" />
-        <input id="ocValor" required placeholder="Valor" />
-        <div class="form-actions">
-          <button type="submit" class="btn">Salvar orçamento</button>
-          <button type="button" class="btn-ghost" onclick="toggleForm('formOrcamento', false)">Cancelar</button>
-        </div>
-      </form>
-      <div class="card" style="padding:0;">
-        <table>
-          <thead><tr><th>Descrição / Projeto</th><th>Valor</th><th>Status</th><th></th></tr></thead>
-          <tbody id="tabelaOrcamentos"></tbody>
-        </table>
-      </div>
-    </section>
-
     <!-- EQUIPE -->
     <section id="view-equipe" class="hidden">
       <h1>Equipe</h1>

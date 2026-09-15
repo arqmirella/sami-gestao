@@ -39,7 +39,7 @@
   .aprov-card{border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;}
   .aprov-tipo{font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;color:var(--terracotta);letter-spacing:.04em;}
   .aprov-titulo{font-size:15px;font-weight:600;margin:4px 0 6px;}
-  .aprov-desc{font-size:13px;color:var(--graphite);margin:0 0 10px;}
+  .aprov-desc{font-size:13px;color:var(--graphite);margin:0 0 10px;white-space:pre-wrap;}
   .aprov-imgs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
   .aprov-imgs img{width:100px;height:100px;object-fit:cover;border-radius:8px;cursor:pointer;}
   .aprov-botoes{display:flex;gap:8px;flex-wrap:wrap;}
@@ -52,6 +52,8 @@
   .checklist-item-cliente{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--paper);font-size:13.5px;cursor:pointer;}
   .checklist-item-cliente:last-child{border-bottom:none;}
   .checklist-item-cliente input{width:18px;height:18px;accent-color:var(--terracotta);flex-shrink:0;}
+  .dados-contrato-form label{font-size:11.5px;color:var(--graphite);display:block;margin:8px 0 3px;}
+  .dados-contrato-form input{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;}
   .checklist-item-opcoes{padding:10px 0;border-bottom:1px solid var(--paper);}
   .checklist-item-opcoes:last-child{border-bottom:none;}
   .checklist-item-nome{font-size:13.5px;font-weight:500;display:block;margin-bottom:6px;}
@@ -196,7 +198,9 @@ async function carregarERenderizar(){
           : a.status==='aprovado' ? '#5C6E5A' : a.status==='alteracoes' ? '#8B3A2B' : '#C1602E';
         const statusTexto = a.eh_checklist
           ? `${marcadosCk}/${itensCk.length} marcados`
-          : a.status==='aprovado' ? 'Aprovado' : a.status==='alteracoes' ? 'Alterações solicitadas' : 'Aguardando sua análise';
+          : a.tipo==='dados_contrato'
+            ? (a.status==='pendente' ? 'Aguardando seus dados' : 'Dados enviados')
+            : a.status==='aprovado' ? 'Aprovado' : a.status==='alteracoes' ? 'Alterações solicitadas' : 'Aguardando sua análise';
         const capa = (a.imagens||[])[0];
         return `
         <div class="entrega-row" onclick="toggleEntrega('${a.id}')">
@@ -224,6 +228,25 @@ async function carregarERenderizar(){
                   <input type="checkbox" ${i.marcado?'checked':''} onchange="marcarItemChecklist('${i.id}', this.checked)" />
                   <span>${esc(i.item)}</span>
                 </label>`).join('')}
+            </div>
+          ` : a.tipo==='dados_contrato' ? `
+            <div onclick="event.stopPropagation();">
+              ${a.status==='pendente' ? `
+                <div class="dados-contrato-form">
+                  <label>Nome completo</label>
+                  <input id="dc-nome-${a.id}" value="${esc(a.dados_nome||'')}" />
+                  <label>CPF</label>
+                  <input id="dc-cpf-${a.id}" value="${esc(a.dados_cpf||'')}" placeholder="000.000.000-00" />
+                  <label>RG</label>
+                  <input id="dc-rg-${a.id}" value="${esc(a.dados_rg||'')}" />
+                  <button class="btn-aprovar" style="margin-top:6px;" onclick="enviarDadosContrato('${a.id}')">Enviar dados</button>
+                </div>
+              ` : `
+                <div class="aprov-comentario-lido">
+                  <p style="margin:0 0 3px;"><b>${esc(a.dados_nome||'')}</b></p>
+                  <p style="margin:0;">CPF: ${esc(a.dados_cpf||'—')} · RG: ${esc(a.dados_rg||'—')}</p>
+                </div>
+              `}
             </div>
           ` : a.status==='pendente' ? `
             <div class="aprov-botoes" onclick="event.stopPropagation();">
@@ -257,6 +280,22 @@ async function marcarItemChecklist(itemId, marcado){
   });
   if(error || !data){
     alert('Não consegui salvar. Tenta de novo.');
+    return;
+  }
+  await carregarERenderizar();
+  reabrirEntregasAbertas();
+}
+
+async function enviarDadosContrato(aprovacaoId){
+  const nome = document.getElementById('dc-nome-'+aprovacaoId).value.trim();
+  const cpf = document.getElementById('dc-cpf-'+aprovacaoId).value.trim();
+  const rg = document.getElementById('dc-rg-'+aprovacaoId).value.trim();
+  if(!nome || !cpf){ alert('Preenche pelo menos o nome e o CPF.'); return; }
+  const { data, error } = await window._sb.rpc('portal_enviar_dados_contrato', {
+    p_token: window._token, p_aprovacao_id: aprovacaoId, p_nome: nome, p_cpf: cpf, p_rg: rg || null,
+  });
+  if(error || !data){
+    alert('Não consegui enviar. Tenta de novo.');
     return;
   }
   await carregarERenderizar();

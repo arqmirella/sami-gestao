@@ -17,6 +17,11 @@ const DIAS_ALERTA_PRAZO = 3;
 /* Com quantos dias de antecedência destacar um aniversário chegando (de
    cliente ou da equipe) como "em breve" na tela Início. */
 const DIAS_ALERTA_ANIVERSARIO = 15;
+
+/* Por quantos dias uma tarefa concluída continua aparecendo na coluna
+   "Concluída" do kanban. Depois disso ela some da tela (mas continua
+   guardada no banco e contando no relatório de produtividade). */
+const DIAS_MOSTRAR_CONCLUIDAS = 30;
 /* ====================================================================== */
 
 let sb;
@@ -52,6 +57,16 @@ function checarErro(resultado, contexto){
   }
   return false;
 }
+
+/* Exclusão padronizada: pede confirmação, avisa se der erro e recarrega a tela.
+   Devolve true se realmente excluiu. */
+async function excluirComConfirmacao(tabela, id, oQueEh, aoTerminar){
+  if(!confirm(`Excluir ${oQueEh}? Essa ação não pode ser desfeita.`)) return false;
+  const resultado = await sb.from(tabela).delete().eq('id', id);
+  if(checarErro(resultado, `excluir ${oQueEh}`)) return false;
+  if(typeof aoTerminar === 'function') aoTerminar();
+  return true;
+}
 /* Lê um valor em R$ digitado do jeito brasileiro: "1.500,00" ou "1500,00" ou "1500.00" ou "1500" */
 function parseValorBR(texto){
   if(!texto) return NaN;
@@ -62,6 +77,23 @@ function parseValorBR(texto){
   return Number(limpo);
 }
 function fmtDataBR(d){ return new Date(d+'T00:00:00').toLocaleDateString('pt-BR'); }
+
+/* Cabeçalho e rodapé padrão de todo documento gerado pra impressão/PDF */
+function cabecalhoDocumentoHTML(){
+  const logoUrl = new URL('logo-sami.png', window.location.href).href;
+  return `<div style="display:flex;align-items:center;gap:12px;border-bottom:2px solid #C1602E;padding-bottom:14px;margin-bottom:26px;">
+    <img src="${logoUrl}" style="width:46px;height:46px;object-fit:contain;" />
+    <div>
+      <p style="margin:0;font-family:Georgia,serif;font-size:16px;font-weight:700;letter-spacing:.02em;">SAMI Arquitetura</p>
+      <p style="margin:0;font-size:10.5px;color:#5C554C;letter-spacing:.04em;text-transform:uppercase;">Arquitetura & Interiores</p>
+    </div>
+  </div>`;
+}
+function rodapeDocumentoHTML(){
+  return `<div style="margin-top:44px;padding-top:14px;border-top:1px solid #E3DACD;text-align:center;font-size:10.5px;color:#9C948A;">
+    SAMI Arquitetura — Documento gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}
+  </div>`;
+}
 function toggleForm(id, show){
   const f = document.getElementById(id);
   if(show===undefined) f.classList.toggle('hidden');
@@ -112,7 +144,7 @@ function showLogin(){
 }
 
 /* ---------------- NAVEGAÇÃO ---------------- */
-const VIEWS = ['inicio','projetos','projeto-detalhe','clientes','cliente-detalhe','conteudo','financeiro','fornecedores','orcamentos','equipe'];
+const VIEWS = ['inicio','projetos','projeto-detalhe','clientes','cliente-detalhe','conteudo','financeiro','fornecedores','equipe'];
 function navigate(view, opts){
   opts = opts || {};
   VIEWS.forEach(v => document.getElementById('view-'+v).classList.toggle('hidden', v!==view));
@@ -120,10 +152,9 @@ function navigate(view, opts){
   if(view==='inicio') loadInicio();
   if(view==='projetos') trocarAbaProjetosModulo(opts.subaba || 'dashboard');
   if(view==='clientes') loadClientes();
-  if(view==='conteudo') loadConteudo();
+  if(view==='conteudo') trocarAbaConteudo('planner');
   if(view==='financeiro') trocarAbaFinanceiro('fluxo');
   if(view==='fornecedores') loadFornecedores();
-  if(view==='orcamentos') loadOrcamentos();
   if(view==='equipe') loadEquipe();
   if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId, opts.aba);
   if(view==='cliente-detalhe' && opts.clienteId) loadClienteDetalhe(opts.clienteId);
@@ -158,6 +189,7 @@ function trocarAbaProjetosModulo(tab){
   if(tab==='dashboard'){ loadDashboardProjetos(); loadProjetos(); }
   if(tab==='tarefas') loadTarefas();
   if(tab==='cronograma') loadCronograma();
+  if(tab==='orcamentos') loadOrcamentos();
 }
 
 async function loadDashboardProjetos(){
@@ -248,9 +280,11 @@ function atualizarRelogio(){
   const agora = new Date();
   const heroHora = document.getElementById('heroHora');
   if(!heroHora) return;
-  document.getElementById('heroDia').textContent = DIAS_SEMANA[agora.getDay()];
+  const h = agora.getHours();
+  const saudacao = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+  document.getElementById('heroDia').textContent = saudacao;
   heroHora.textContent = agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-  document.getElementById('heroData').textContent = `${agora.getDate()} de ${MESES[agora.getMonth()].toLowerCase()} de ${agora.getFullYear()}`;
+  document.getElementById('heroData').textContent = `${DIAS_SEMANA[agora.getDay()].toLowerCase()}, ${agora.getDate()} de ${MESES[agora.getMonth()].toLowerCase()}`;
 }
 
 function chaveDia(d){ return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; }
@@ -284,29 +318,84 @@ async function loadInicio(){
   renderTarefasHoje(tarefasHoje||[]);
   renderRecados(recados||[]);
   renderGoogleAgenda();
+  await renderResumoEIndicadores(tarefasHoje||[], compromissos||[]);
+}
+
+/* Frase de resumo do dia + os quatro indicadores do topo da Início */
+async function renderResumoEIndicadores(tarefas, compromissos){
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const hojeStr = hoje.toISOString().slice(0,10);
+  const limite = new Date(hoje); limite.setDate(limite.getDate() + DIAS_ALERTA_PRAZO);
+  const limiteStr = limite.toISOString().slice(0,10);
+  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+
+  const [{ data: projetosAtivos }, { data: respostasCliente }, { data: parcelasMes }] = await Promise.all([
+    sb.from('projetos').select('id').eq('status','em_andamento').eq('is_modelo', false),
+    sb.from('aprovacoes_cliente').select('id').neq('status','pendente').eq('visto_pela_equipe', false),
+    sb.from('financeiro_parcelas').select('valor').eq('status','pago').gte('vencimento', inicioMes),
+  ]);
+
+  const comPrazoHoje = tarefas.filter(t => t.prazo === hojeStr).length;
+  const atrasadas = tarefas.filter(t => t.prazo && t.prazo < hojeStr).length;
+  const vencendo = tarefas.filter(t => t.prazo && t.prazo >= hojeStr && t.prazo <= limiteStr).length;
+  const compromissosHoje = (compromissos||[]).filter(c => new Date(c.data_hora).toISOString().slice(0,10) === hojeStr);
+  const respostas = (respostasCliente||[]).length;
+  const recebidoMes = (parcelasMes||[]).reduce((s,p) => s + Number(p.valor||0), 0);
+
+  // Monta a frase só com o que realmente existe hoje
+  const partes = [];
+  if(comPrazoHoje > 0) partes.push(`<b>${comPrazoHoje} tarefa${comPrazoHoje>1?'s':''}</b> com prazo`);
+  if(compromissosHoje.length > 0){
+    const primeiro = new Date(compromissosHoje[0].data_hora).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+    partes.push(`<b>${compromissosHoje.length} compromisso${compromissosHoje.length>1?'s':''}</b>${compromissosHoje.length===1?` às ${primeiro}`:''}`);
+  }
+  if(respostas > 0) partes.push(`<b>${respostas} client${respostas>1?'es':'e'}</b> esperando retorno`);
+
+  const elResumo = document.getElementById('heroResumo');
+  elResumo.innerHTML = partes.length === 0
+    ? 'Nenhum prazo nem compromisso pra hoje. Bom momento pra adiantar o que vem pela frente.'
+    : 'Hoje você tem ' + (partes.length === 1 ? partes[0] : partes.slice(0,-1).join(', ') + ' e ' + partes[partes.length-1]) + '.';
+
+  const fmtCompacto = v => v >= 1000 ? `R$ ${Math.round(v/1000)}k` : fmtMoeda(v);
+  document.getElementById('indicadoresInicio').innerHTML = `
+    <div class="ind" onclick="navigate('projetos')">
+      <span class="ind-num">${(projetosAtivos||[]).length}</span>
+      <span class="ind-txt">projetos<br>em andamento</span>
+    </div>
+    <div class="ind destaque" onclick="navigate('projetos',{subaba:'tarefas'})">
+      <span class="ind-num">${atrasadas}</span>
+      <span class="ind-txt">tarefas<br>atrasadas</span>
+    </div>
+    <div class="ind atencao" onclick="navigate('projetos',{subaba:'tarefas'})">
+      <span class="ind-num">${vencendo}</span>
+      <span class="ind-txt">vencendo<br>em ${DIAS_ALERTA_PRAZO} dias</span>
+    </div>
+    <div class="ind ok" onclick="navigate('financeiro')">
+      <span class="ind-num">${fmtCompacto(recebidoMes)}</span>
+      <span class="ind-txt">recebido<br>neste mês</span>
+    </div>`;
 }
 
 function renderTarefasHoje(tarefas){
   const hojeStr = new Date().toISOString().slice(0,10);
-  const hoje = new Date(); hoje.setHours(0,0,0,0);
   const relevantes = tarefas.filter(t => t.prazo && t.prazo <= hojeStr);
   const cont = document.getElementById('tarefasHoje');
 
   if(relevantes.length===0){
-    cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhuma tarefa vencendo hoje.</p>';
+    cont.innerHTML = '<p class="muted" style="padding:18px;">Nenhuma tarefa vencendo hoje.</p>';
     return;
   }
 
+  const CORES_STATUS_LINHA = { pendente:'var(--clay)', em_andamento:'var(--terracotta)', concluida:'var(--sage)' };
   cont.innerHTML = relevantes.map(t => {
     const atrasada = t.prazo < hojeStr;
-    return `<div class="compromisso" style="cursor:pointer;" onclick="navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})">
-      <div class="compromisso-row">
-        <div>
-          <p style="font-size:14px;margin:0;">${esc(t.titulo)}</p>
-          <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${esc(t.projetos?.nome||'')}</p>
-        </div>
+    return `<div class="linha-item" onclick="navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})">
+      <span class="marca-status" style="background:${atrasada?'var(--alert)':(CORES_STATUS_LINHA[t.status]||'var(--terracotta)')};"></span>
+      <div class="linha-txt">
+        <p>${esc(t.titulo)}</p>
+        <span>${esc(t.projetos?.nome||'')}</span>
       </div>
-      <span class="badge ${atrasada?'alert':'line'}">${atrasada ? 'Atrasada · '+fmtDataBR(t.prazo) : 'Hoje'}</span>
+      <span class="etiqueta ${atrasada?'atrasada':'hoje'}">${atrasada ? fmtDataBR(t.prazo) : 'hoje'}</span>
     </div>`;
   }).join('');
 }
@@ -382,8 +471,7 @@ async function criarLinkRapido(e, categoria){
   loadInicio();
 }
 async function excluirLinkRapido(id){
-  await sb.from('links_rapidos').delete().eq('id', id);
-  loadInicio();
+  await excluirComConfirmacao('links_rapidos', id, 'esse link', () => loadInicio());
 }
 
 function renderCalendario(){
@@ -447,15 +535,13 @@ function renderAniversarios(clientesAniv, equipeAniv){
   cont.innerHTML = doMes.map(a => {
     const diasFalta = diasEntre(hoje, a.proxima);
     const emBreve = diasFalta >= 0 && diasFalta <= DIAS_ALERTA_ANIVERSARIO;
-    return `<div class="compromisso">
-      <div class="compromisso-row">
-        <div class="datebox"><p class="day">${a.proxima.toLocaleDateString('pt-BR',{day:'2-digit'})}</p><p class="mon">${a.proxima.toLocaleDateString('pt-BR',{month:'short'})}</p></div>
-        <div>
-          <p style="font-size:14px;margin:0;">${esc(a.nome)}</p>
-          <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${a.tipo}</p>
-        </div>
+    return `<div class="aniv-linha">
+      <span class="aniv-dia">${a.proxima.toLocaleDateString('pt-BR',{day:'2-digit'})}</span>
+      <div class="linha-txt">
+        <p>${esc(a.nome)}</p>
+        <span>${a.tipo.toLowerCase()}</span>
       </div>
-      ${emBreve ? `<span class="badge clay">${diasFalta===0?'Hoje!':diasFalta+' dia'+(diasFalta>1?'s':'')}</span>` : ''}
+      ${emBreve ? `<span class="etiqueta hoje">${diasFalta===0?'hoje':diasFalta+' dia'+(diasFalta>1?'s':'')}</span>` : ''}
     </div>`;
   }).join('');
 }
@@ -463,21 +549,15 @@ function renderAniversarios(clientesAniv, equipeAniv){
 function renderCompromissos(){
   const agoraMs = Date.now() - 1000*60*60*6;
   const proximos = (window._compromissos||[]).filter(c => new Date(c.data_hora).getTime() >= agoraMs).slice(0,5);
-  document.getElementById('heroResumo').textContent = proximos.length===0
-    ? 'Nenhum compromisso agendado.'
-    : `${proximos.length} compromisso${proximos.length>1?'s':''} nos próximos dias.`;
-
   const cont = document.getElementById('listaCompromissos');
-  if(proximos.length===0){ cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhum compromisso agendado.</p>'; return; }
+  if(proximos.length===0){ cont.innerHTML = '<p class="muted" style="padding:18px;">Nenhum compromisso agendado.</p>'; return; }
   cont.innerHTML = proximos.map(c => {
     const d = new Date(c.data_hora);
-    return `<div class="compromisso">
-      <div class="compromisso-row">
-        <div class="datebox"><p class="day">${d.toLocaleDateString('pt-BR',{day:'2-digit'})}</p><p class="mon">${d.toLocaleDateString('pt-BR',{month:'short'})}</p></div>
-        <div>
-          <p style="font-size:14px;margin:0;">${esc(c.titulo)}</p>
-          <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}${c.local?` · ${esc(c.local)}`:''}${c.projetos?.nome?` · ${esc(c.projetos.nome)}`:''}</p>
-        </div>
+    return `<div class="linha-item" style="cursor:default;">
+      <div class="datebox" style="flex-shrink:0;"><p class="day">${d.toLocaleDateString('pt-BR',{day:'2-digit'})}</p><p class="mon">${d.toLocaleDateString('pt-BR',{month:'short'})}</p></div>
+      <div class="linha-txt">
+        <p>${esc(c.titulo)}</p>
+        <span>${d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}${c.local?` · ${esc(c.local)}`:''}${c.projetos?.nome?` · ${esc(c.projetos.nome)}`:''}</span>
       </div>
       <button class="remove-link" onclick="excluirCompromisso('${c.id}')">remover</button>
     </div>`;
@@ -497,8 +577,7 @@ async function criarCompromisso(e){
   loadInicio();
 }
 async function excluirCompromisso(id){
-  await sb.from('compromissos').delete().eq('id', id);
-  loadInicio();
+  await excluirComConfirmacao('compromissos', id, 'esse compromisso', () => loadInicio());
 }
 
 /* ================= PROJETOS ================= */
@@ -607,6 +686,7 @@ function trocarAbaProjeto(tab){
   document.querySelectorAll('.pd-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
   if(tab==='anexos') loadAnexos();
   if(tab==='orcamentos') loadOrcamentosProjeto();
+  if(tab==='contrato') loadContrato();
   if(tab==='atas') loadAtas();
   if(tab==='briefing') loadBriefing();
   if(tab==='checklist') loadChecklistRevisao();
@@ -628,7 +708,7 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
     sb.from('projetos').select('*, clientes(nome_completo)').eq('id', projetoId).single(),
     sb.from('etapas').select('*').eq('projeto_id', projetoId).order('ordem'),
     sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,etapa_id,ambiente_id,ambientes(nome)').eq('projeto_id', projetoId).order('criado_em',{ascending:true}),
-    sb.from('financeiro_parcelas').select('id,descricao,valor,vencimento,status').eq('projeto_id', projetoId).order('vencimento'),
+    sb.from('financeiro_parcelas').select('id,descricao,valor,vencimento,status,data_pagamento').eq('projeto_id', projetoId).order('vencimento'),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe(nome)'),
     sb.from('equipe').select('id,nome').eq('ativo', true).order('nome'),
     sb.from('registros_visita').select('*').eq('projeto_id', projetoId).order('data',{ascending:false}),
@@ -804,7 +884,9 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
           <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${fmtMoeda(p.valor)} · ${fmtDataBR(p.vencimento)}</p>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
-          ${p.status!=='pago' ? `<button class="btn-ghost" style="font-size:12px;color:var(--sage);padding:0;" onclick="marcarParcelaProjetoPaga('${p.id}')">marcar pago</button>` : ''}
+          ${p.status!=='pago'
+            ? `<button class="btn-ghost" style="font-size:12px;color:var(--sage);padding:0;" onclick="marcarParcelaProjetoPaga('${p.id}')">marcar pago</button>`
+            : `<button class="edit-link" onclick="imprimirRecibo('${p.id}')">recibo</button>`}
           <button class="remove-link" onclick="excluirParcelaProjeto('${p.id}')">remover</button>
         </div>
       </div>`).join('');
@@ -885,6 +967,21 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
     (ambientes||[]).map(a => `<option value="${a.id}">${esc(a.nome)}</option>`).join('');
 
   renderPortalCliente(projeto);
+  renderStatusDocumentosFinais(projeto);
+}
+
+function renderStatusDocumentosFinais(projeto){
+  const elTermo = document.getElementById('statusTermoFinal');
+  const elAut = document.getElementById('statusAutorizacaoImagem');
+  if(!elTermo || !elAut) return;
+
+  elTermo.textContent = projeto.termo_final_status==='assinado' ? `Assinado · ${fmtDataBR(projeto.termo_final_data)}` : 'Pendente';
+  elTermo.style.color = projeto.termo_final_status==='assinado' ? 'var(--sage)' : 'var(--graphite)';
+  document.getElementById('btnMarcarTermoFinal').style.display = projeto.termo_final_status==='assinado' ? 'none' : 'inline';
+
+  elAut.textContent = projeto.autorizacao_imagem_status==='assinado' ? `Assinada · ${fmtDataBR(projeto.autorizacao_imagem_data)}` : 'Pendente';
+  elAut.style.color = projeto.autorizacao_imagem_status==='assinado' ? 'var(--sage)' : 'var(--graphite)';
+  document.getElementById('btnMarcarAutorizacaoImagem').style.display = projeto.autorizacao_imagem_status==='assinado' ? 'none' : 'inline';
 }
 
 function linkPortalCompleto(token){
@@ -927,7 +1024,8 @@ function copiarLinkPortal(link){
 }
 
 async function atualizarStatusProjeto(status){
-  await sb.from('projetos').update({ status }).eq('id', projetoAtualId);
+  const r = await sb.from('projetos').update({ status }).eq('id', projetoAtualId);
+  if(checarErro(r, 'atualizar status do projeto')) return;
 }
 async function excluirProjetoAtual(){
   if(!confirm('Excluir este projeto? Isso apaga etapas, tarefas e financeiro dele.')) return;
@@ -994,11 +1092,11 @@ async function executarAutomacaoEtapa(etapaConcluidaId){
 }
 
 async function excluirEtapa(id){
-  await sb.from('etapas').delete().eq('id', id);
-  loadProjetoDetalhe(projetoAtualId);
+  await excluirComConfirmacao('etapas', id, 'essa etapa e todo o checklist dela', () => loadProjetoDetalhe(projetoAtualId));
 }
 async function marcarTermoAssinado(id){
-  await sb.from('etapas').update({ termo_status:'assinado', termo_assinado_em: new Date().toISOString() }).eq('id', id);
+  const r = await sb.from('etapas').update({ termo_status:'assinado', termo_assinado_em: new Date().toISOString() }).eq('id', id);
+  if(checarErro(r, 'marcar termo assinado')) return;
   loadProjetoDetalhe(projetoAtualId);
 }
 function abrirTermoEtapa(etapaId){
@@ -1010,12 +1108,14 @@ function abrirTermoEtapa(etapaId){
       <style>body{font-family:Georgia,serif;max-width:680px;margin:60px auto;color:#211C18;line-height:1.6;padding:0 20px;}
       h1{font-size:20px;}p{font-size:14px;}.assinatura{margin-top:80px;border-top:1px solid #999;width:320px;padding-top:8px;font-size:13px;}</style>
       </head><body>
+      ${cabecalhoDocumentoHTML()}
       <h1>Termo de Entrega e Aprovação de Etapa</h1>
       <p><strong>Projeto:</strong> ${esc(dadosProjetoAtual?.nome||'')}</p>
       <p><strong>Etapa:</strong> ${esc(et.nome)}</p>
       <p>Declaro, para os devidos fins, que a etapa acima foi apresentada e entregue pela SAMI Arquitetura, e que o(a) cliente teve a oportunidade de revisar e aprovar o conteúdo apresentado nesta fase do projeto.</p>
       <p>Este documento formaliza a aprovação da etapa citada, servindo como registro de anuência para prosseguimento do projeto.</p>
       <div class="assinatura">Assinatura do cliente — ${new Date().toLocaleDateString('pt-BR')}</div>
+      ${rodapeDocumentoHTML()}
       </body></html>`);
     janela.document.close();
   });
@@ -1037,12 +1137,14 @@ async function adicionarTarefaProjeto(e){
   loadProjetoDetalhe(projetoAtualId);
 }
 async function moverTarefaProjeto(id, status){
-  await sb.from('tarefas').update({ status }).eq('id', id);
+  const mudancas = { status };
+  if(status==='concluida') mudancas.concluida_em = new Date().toISOString();
+  const r = await sb.from('tarefas').update(mudancas).eq('id', id);
+  if(checarErro(r, 'mover tarefa')) return;
   loadProjetoDetalhe(projetoAtualId);
 }
 async function excluirTarefaProjeto(id){
-  await sb.from('tarefas').delete().eq('id', id);
-  loadProjetoDetalhe(projetoAtualId);
+  await excluirComConfirmacao('tarefas', id, 'essa tarefa', () => loadProjetoDetalhe(projetoAtualId));
 }
 
 /* ---- Financeiro do projeto ---- */
@@ -1119,13 +1221,12 @@ async function adicionarParcelaProjeto(e){
   loadProjetoDetalhe(projetoAtualId);
 }
 async function marcarParcelaProjetoPaga(id){
-  const resultado = await sb.from('financeiro_parcelas').update({ status: 'pago' }).eq('id', id);
+  const resultado = await sb.from('financeiro_parcelas').update({ status: 'pago', data_pagamento: new Date().toISOString().slice(0,10) }).eq('id', id);
   if(checarErro(resultado, 'marcar parcela como paga')) return;
   loadProjetoDetalhe(projetoAtualId);
 }
 async function excluirParcelaProjeto(id){
-  await sb.from('financeiro_parcelas').delete().eq('id', id);
-  loadProjetoDetalhe(projetoAtualId);
+  await excluirComConfirmacao('financeiro_parcelas', id, 'essa parcela', () => loadProjetoDetalhe(projetoAtualId));
 }
 
 /* ---- Visitas ---- */
@@ -1144,12 +1245,12 @@ async function adicionarVisita(e){
   loadProjetoDetalhe(projetoAtualId);
 }
 async function alternarVisitaFlag(id, campo, valorAtual){
-  await sb.from('registros_visita').update({ [campo]: !valorAtual }).eq('id', id);
+  const r = await sb.from('registros_visita').update({ [campo]: !valorAtual }).eq('id', id);
+  if(checarErro(r, 'atualizar visita')) return;
   loadProjetoDetalhe(projetoAtualId);
 }
 async function excluirVisita(id){
-  await sb.from('registros_visita').delete().eq('id', id);
-  loadProjetoDetalhe(projetoAtualId);
+  await excluirComConfirmacao('registros_visita', id, 'esse registro de visita', () => loadProjetoDetalhe(projetoAtualId));
 }
 
 /* ---- Relatórios de obra ---- */
@@ -1173,8 +1274,7 @@ async function criarRelatorioObra(e){
   loadProjetoDetalhe(projetoAtualId);
 }
 async function excluirRelatorio(id){
-  await sb.from('relatorios_obra').delete().eq('id', id);
-  loadProjetoDetalhe(projetoAtualId);
+  await excluirComConfirmacao('relatorios_obra', id, 'esse relatório de obra', () => loadProjetoDetalhe(projetoAtualId));
 }
 function abrirRelatorio(id){
   const r = (window._relatoriosProjeto||[]).find(x => x.id===id);
@@ -1187,6 +1287,7 @@ function abrirRelatorio(id){
     h1{font-size:21px;margin-bottom:4px;}h2{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:#5C554C;margin-top:32px;border-bottom:1px solid #E3DACD;padding-bottom:6px;}
     p{font-size:14px;}table{width:100%;font-size:13.5px;margin-top:8px;}td{padding:3px 0;vertical-align:top;}td:first-child{color:#5C554C;width:220px;}</style>
     </head><body>
+    ${cabecalhoDocumentoHTML()}
     <h1>Relatório de Acompanhamento de Obra</h1>
     <p style="color:#5C554C;">${esc(p.nome)}</p>
 
@@ -1217,6 +1318,7 @@ function abrirRelatorio(id){
 
     <h2>Registro Fotográfico</h2>
     <p>${r.link_fotos ? `<a href="${esc(r.link_fotos)}">${esc(r.link_fotos)}</a>` : '—'}</p>
+    ${rodapeDocumentoHTML()}
     </body></html>`);
   janela.document.close();
 }
@@ -1237,7 +1339,8 @@ async function salvarDadosObra(e){
     const capaUrl = await uploadFotoProjeto(arquivoFoto);
     if(capaUrl) atualizacao.capa_url = capaUrl;
   }
-  await sb.from('projetos').update(atualizacao).eq('id', projetoAtualId);
+  const r = await sb.from('projetos').update(atualizacao).eq('id', projetoAtualId);
+  if(checarErro(r, 'salvar dados da obra')) return;
   loadProjetoDetalhe(projetoAtualId);
 }
 
@@ -1265,7 +1368,7 @@ async function loadTarefas(){
   ).join('');
 
   const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }, { data: todasEtapas }] = await Promise.all([
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,etapa_id,ambiente_id,ordem_manual,projetos(nome),ambientes(nome)').order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,etapa_id,ambiente_id,ordem_manual,concluida_em,criado_em,projetos(nome),ambientes(nome)').order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id,equipe(nome)'),
     sb.from('tarefas_tempo').select('id,tarefa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
     sb.from('etapas').select('id,nome'),
@@ -1341,8 +1444,19 @@ function alternarVisaoTarefas(visao){
 
 function tarefasFiltradas(){
   const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const limiteConcluidas = new Date(hoje);
+  limiteConcluidas.setDate(limiteConcluidas.getDate() - DIAS_MOSTRAR_CONCLUIDAS);
+
   return (window._tarefas||[]).filter(t => {
     const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
+
+    // Concluída há mais de X dias some da tela (continua no banco e nos relatórios).
+    // Se você filtrar explicitamente por "Concluída", mostra todas.
+    if(t.status==='concluida' && filtroTarefaAtual!=='concluida'){
+      const quando = t.concluida_em ? new Date(t.concluida_em) : (t.criado_em ? new Date(t.criado_em) : null);
+      if(quando && quando < limiteConcluidas) return false;
+    }
+
     if(filtroAmbienteAtual!=='todos'){
       if(filtroAmbienteAtual==='sem_ambiente' && t.ambiente_id) return false;
       if(filtroAmbienteAtual!=='sem_ambiente' && t.ambiente_id!==filtroAmbienteAtual) return false;
@@ -1380,7 +1494,7 @@ function renderKanbanTarefas(){
         const resp = respPorTarefa.get(t.id) || [];
         const tempoAberto = tempoAbertoPorTarefa.get(t.id);
         return `<div class="task-card${atrasada?' atrasada':''}" draggable="true" ondragstart="dragStartTarefa(event,'${t.id}')" ondragend="dragEndTarefa(event)">
-          <p class="label" style="margin-bottom:2px;">${esc(t.projetos?.nome||'')}${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p>
+          <p class="label" style="margin-bottom:2px;"><a href="#" onclick="event.preventDefault();navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--terracotta);">${esc(t.projetos?.nome||'')}</a>${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p>
           <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;">
             <p class="task-title">${esc(t.titulo)}</p>
             <div style="display:flex;gap:8px;flex-shrink:0;">
@@ -1528,8 +1642,16 @@ async function criarTarefaGlobal(e){
   toggleForm('formNovaTarefa', false);
   loadTarefas();
 }
-async function moverTarefaKanban(id, status){ await sb.from('tarefas').update({ status }).eq('id', id); loadTarefas(); }
-async function excluirTarefaKanban(id){ await sb.from('tarefas').delete().eq('id', id); loadTarefas(); }
+async function moverTarefaKanban(id, status){
+  const mudancas = { status };
+  if(status==='concluida') mudancas.concluida_em = new Date().toISOString();
+  const r = await sb.from('tarefas').update(mudancas).eq('id', id);
+  if(checarErro(r, 'mover tarefa')) return;
+  loadTarefas();
+}
+async function excluirTarefaKanban(id){
+  await excluirComConfirmacao('tarefas', id, 'essa tarefa', () => loadTarefas());
+}
 async function iniciarCronometro(tarefaId){
   const sel = document.getElementById('sel-eq-'+tarefaId);
   const equipeId = sel ? sel.value : null;
@@ -1540,7 +1662,8 @@ async function iniciarCronometro(tarefaId){
   const resultado = await sb.from('tarefas_tempo').insert({ tarefa_id: tarefaId, equipe_id: equipeId, inicio: new Date().toISOString() });
   if(checarErro(resultado, 'iniciar cronômetro')) return;
   // Já que você começou a trabalhar nela agora, ela sobe pro topo da coluna sozinha
-  await sb.from('tarefas').update({ ordem_manual: -Date.now() }).eq('id', tarefaId);
+  const r = await sb.from('tarefas').update({ ordem_manual: -Date.now() }).eq('id', tarefaId);
+  if(checarErro(r, 'reordenar tarefa')) return;
   loadTarefas();
 }
 async function trazerTarefaParaTopo(tarefaId){
@@ -1577,10 +1700,13 @@ function statusEfetivoGenerico(item){
 
 async function loadFluxoCaixa(){
   await ensureChartJs();
-  const [{ data: parcelas }, { data: despesas }] = await Promise.all([
+  const [{ data: parcelas }, { data: despesas }, { data: configData }] = await Promise.all([
     sb.from('financeiro_parcelas').select('valor,vencimento,status'),
     sb.from('despesas').select('valor,vencimento,status'),
+    sb.from('config_financeiro').select('meta_mensal').eq('id', 1).maybeSingle(),
   ]);
+  const metaMensal = Number(configData?.meta_mensal || 0);
+  window._metaMensalAtual = metaMensal;
 
   let entradas = 0;
   (parcelas||[]).forEach(p => { if(statusEfetivoGenerico(p)==='pago') entradas += Number(p.valor); });
@@ -1605,7 +1731,20 @@ async function loadFluxoCaixa(){
   (parcelas||[]).forEach(p => { if(statusEfetivoGenerico(p)==='pago') addAoMes(p.vencimento, 'entradas', Number(p.valor)); });
   (despesas||[]).forEach(d => { if(statusEfetivoGenerico(d)==='pago') addAoMes(d.vencimento, 'saidas', Number(d.valor)); });
 
-  const dadosMeses = Array.from(meses.entries()).sort(([a],[b]) => a.localeCompare(b)).map(([,v]) => v);
+  const dadosMeses = Array.from(meses.entries()).sort(([a],[b]) => a.localeCompare(b)).map(([chave,v]) => ({ chave, ...v }));
+
+  // Meta do mês atual
+  const hoje = new Date();
+  const chaveMesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+  const entradasMesAtual = meses.get(chaveMesAtual)?.entradas || 0;
+  const pctMeta = metaMensal>0 ? Math.min(100, Math.round((entradasMesAtual/metaMensal)*100)) : 0;
+  document.getElementById('blocoMetaMensal').innerHTML = metaMensal>0 ? `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+      <span style="font-size:22px;font-weight:600;font-family:'Space Grotesk',sans-serif;color:${pctMeta>=100?'var(--sage)':'var(--terracotta)'};">${fmtMoeda(entradasMesAtual)}</span>
+      <span class="muted">de ${fmtMoeda(metaMensal)} (${pctMeta}%)</span>
+    </div>
+    <div class="bar"><div style="width:${pctMeta}%;background:${pctMeta>=100?'var(--sage)':'var(--terracotta)'};"></div></div>
+  ` : `<p class="muted" style="margin:0;">Nenhuma meta mensal definida ainda — clique em "editar meta" pra configurar.</p>`;
 
   if(charts.fluxo) charts.fluxo.destroy();
   charts.fluxo = new Chart(document.getElementById('chartFluxo'), {
@@ -1617,6 +1756,29 @@ async function loadFluxoCaixa(){
       ]},
     options:{responsive:true, plugins:{legend:{labels:{font:{size:11}}}}, scales:{x:{grid:{display:false}},y:{grid:{color:'#EFEAE1'}}}}
   });
+
+  document.getElementById('tabelaMensalFinanceiro').innerHTML = dadosMeses.length===0
+    ? '<tr><td colspan="4" class="muted">Nenhum dado ainda.</td></tr>'
+    : dadosMeses.slice().reverse().map(d => {
+      const lucro = d.entradas - d.saidas;
+      return `<tr>
+        <td style="text-transform:capitalize;">${d.mes}</td>
+        <td style="color:${CORES.pago};">${fmtMoeda(d.entradas)}</td>
+        <td style="color:${CORES.atrasado};">${fmtMoeda(d.saidas)}</td>
+        <td style="font-weight:600;color:${lucro>=0?CORES.pago:CORES.atrasado};">${fmtMoeda(lucro)}</td>
+      </tr>`;
+    }).join('');
+}
+
+async function editarMetaMensal(){
+  const atual = window._metaMensalAtual || 0;
+  const novoValor = prompt('Meta de faturamento por mês (R$):', atual>0 ? String(atual).replace('.',',') : '');
+  if(novoValor===null) return;
+  const valor = parseValorBR(novoValor);
+  if(isNaN(valor) || valor<0){ alert('Digita um valor válido.'); return; }
+  const resultado = await sb.from('config_financeiro').update({ meta_mensal: valor }).eq('id', 1);
+  if(checarErro(resultado, 'salvar meta')) return;
+  loadFluxoCaixa();
 }
 
 async function loadContasReceber(){
@@ -1626,7 +1788,7 @@ async function loadContasReceber(){
 
   const { data: parcelas } = await sb
     .from('financeiro_parcelas')
-    .select('id,descricao,valor,vencimento,status,forma_pagamento,projeto_id,projetos(nome)')
+    .select('id,descricao,valor,vencimento,status,forma_pagamento,data_pagamento,projeto_id,projetos(nome,clientes(nome_completo))')
     .order('vencimento', { ascending: true });
   window._parcelas = parcelas || [];
 
@@ -1654,7 +1816,7 @@ async function loadContasReceber(){
         <td>${fmtDataBR(p.vencimento)}</td>
         <td>${fmtMoeda(p.valor)}</td>
         <td>${s==='pago'
-          ? `<span class="pill" style="color:${CORES.pago};border-color:${CORES.pago};">Pago</span>`
+          ? `<span class="pill" style="color:${CORES.pago};border-color:${CORES.pago};">Pago</span> <button class="edit-link" onclick="imprimirRecibo('${p.id}')">recibo</button>`
           : `<button class="pill" style="color:${CORES[s]};border-color:${CORES[s]};" onclick="marcarParcelaPaga('${p.id}')">${s==='atrasado'?'Atrasado':'Pendente'} · marcar pago</button>`}
         </td>
         <td><button class="remove-link" onclick="excluirParcelaGlobal('${p.id}')">remover</button></td>
@@ -1719,11 +1881,13 @@ async function criarParcelaGlobal(e){
   loadContasReceber();
 }
 async function marcarParcelaPaga(id){
-  const resultado = await sb.from('financeiro_parcelas').update({ status:'pago' }).eq('id', id);
+  const resultado = await sb.from('financeiro_parcelas').update({ status:'pago', data_pagamento: new Date().toISOString().slice(0,10) }).eq('id', id);
   if(checarErro(resultado, 'marcar parcela como paga')) return;
   loadContasReceber();
 }
-async function excluirParcelaGlobal(id){ await sb.from('financeiro_parcelas').delete().eq('id', id); loadContasReceber(); }
+async function excluirParcelaGlobal(id){
+  await excluirComConfirmacao('financeiro_parcelas', id, 'essa parcela', () => loadContasReceber());
+}
 
 /* ================= FORNECEDORES ================= */
 async function loadFornecedores(){
@@ -1764,7 +1928,8 @@ function selecionarEstrela(idContainer, idInputOculto, valor){
 async function avaliarFornecedor(id, valor){
   const fornecedor = (window._fornecedores||[]).find(f => f.id===id);
   const novoValor = fornecedor && fornecedor.avaliacao===valor ? null : valor;
-  await sb.from('fornecedores').update({ avaliacao: novoValor }).eq('id', id);
+  const r = await sb.from('fornecedores').update({ avaliacao: novoValor }).eq('id', id);
+  if(checarErro(r, 'salvar avaliação')) return;
   loadFornecedores();
 }
 
@@ -1787,7 +1952,9 @@ async function criarFornecedor(e){
   toggleForm('formFornecedor', false);
   loadFornecedores();
 }
-async function excluirFornecedor(id){ await sb.from('fornecedores').delete().eq('id', id); loadFornecedores(); }
+async function excluirFornecedor(id){
+  await excluirComConfirmacao('fornecedores', id, 'esse fornecedor', () => loadFornecedores());
+}
 
 /* ================= ORÇAMENTOS ================= */
 const STATUS_ORC_LABEL = { aberto:'Em análise', aprovado:'Aprovado', recusado:'Recusado' };
@@ -1839,8 +2006,11 @@ async function criarOrcamento(e){
   toggleForm('formOrcamento', false);
   loadOrcamentos();
 }
-async function atualizarStatusOrcamento(id, status){ await sb.from('orcamentos').update({ status }).eq('id', id); loadOrcamentos(); }
-async function excluirOrcamento(id){ await sb.from('orcamentos').delete().eq('id', id); loadOrcamentos(); }
+async function atualizarStatusOrcamento(id, status){ const r = await sb.from('orcamentos').update({ status }).eq('id', id);
+  if(checarErro(r, 'atualizar status do orçamento')) return; loadOrcamentos(); }
+async function excluirOrcamento(id){
+  await excluirComConfirmacao('orcamentos', id, 'esse orçamento', () => loadOrcamentos());
+}
 
 /* ================= EQUIPE ================= */
 function fmtHoras(segundos){
@@ -1945,13 +2115,14 @@ async function loadClientes(){
   window._clientes = clientes || [];
   const cont = document.getElementById('gridClientes');
   cont.innerHTML = window._clientes.length===0
-    ? '<p class="muted">Nenhum cliente cadastrado ainda.</p>'
+    ? '<p class="muted" style="padding:16px;">Nenhum cliente cadastrado ainda.</p>'
     : window._clientes.map(c => `
-      <div class="card proj-card" onclick="navigate('cliente-detalhe',{clienteId:'${c.id}'})">
-        <p class="proj-title">${esc(c.nome_completo)}</p>
-        ${c.telefones ? `<p style="font-size:13px;color:var(--graphite);margin:2px 0;">${esc(c.telefones)}</p>` : ''}
-        ${c.email ? `<p style="font-size:13px;color:var(--graphite);margin:2px 0;">${esc(c.email)}</p>` : ''}
-        ${c.obra_endereco ? `<p style="font-size:12px;color:var(--graphite);margin:6px 0 0;">${esc(c.obra_endereco)}</p>` : ''}
+      <div class="quicklink-item" style="cursor:pointer;padding:14px 18px;" onclick="navigate('cliente-detalhe',{clienteId:'${c.id}'})">
+        <div>
+          <p style="margin:0;font-size:14px;font-weight:500;">${esc(c.nome_completo)}</p>
+          <p style="margin:2px 0 0;font-size:12.5px;color:var(--graphite);">${[c.telefones, c.email].filter(Boolean).map(esc).join(' · ')}</p>
+        </div>
+        ${c.obra_endereco ? `<span class="badge line">${esc(c.obra_endereco)}</span>` : ''}
       </div>`).join('');
 }
 
@@ -1984,6 +2155,31 @@ async function criarCliente(e){
 }
 
 let clienteAtualId = null;
+let dadosClienteAtual = null;
+
+const CAMPOS_CLIENTE = [
+  { id:'edNome', campo:'nome_completo', label:'Nome completo', obrigatorio:true },
+  { id:'edCpf', campo:'cpf', label:'CPF' },
+  { id:'edRg', campo:'rg', label:'RG' },
+  { id:'edEndereco', campo:'endereco_atual', label:'Endereço atual' },
+  { id:'edNascimento', campo:'data_nascimento', label:'Data de nascimento', tipo:'date' },
+  { id:'edProfissao', campo:'profissao', label:'Profissão' },
+  { id:'edEstadoCivil', campo:'estado_civil', label:'Estado civil' },
+  { id:'edTelefones', campo:'telefones', label:'Telefones' },
+  { id:'edEmail', campo:'email', label:'E-mail' },
+  { id:'edPagamento', campo:'forma_pagamento', label:'Forma de pagamento' },
+  { id:'edConjugeNome', campo:'conjuge_nome', label:'Nome do cônjuge', grupo:'Cônjuge' },
+  { id:'edConjugeNascimento', campo:'conjuge_data_nascimento', label:'Data de nascimento', tipo:'date', grupo:'Cônjuge' },
+  { id:'edConjugeProfissao', campo:'conjuge_profissao', label:'Profissão', grupo:'Cônjuge' },
+  { id:'edConjugeTelefones', campo:'conjuge_telefones', label:'Telefones', grupo:'Cônjuge' },
+  { id:'edConjugeEmail', campo:'conjuge_email', label:'E-mail', grupo:'Cônjuge' },
+  { id:'edObraEndereco', campo:'obra_endereco', label:'Endereço da obra', grupo:'Informações da obra' },
+  { id:'edZeladorNome', campo:'zelador_nome', label:'Nome do zelador', grupo:'Informações da obra' },
+  { id:'edZeladorContato', campo:'zelador_contato', label:'Contato do zelador', grupo:'Informações da obra' },
+  { id:'edSindicoNome', campo:'sindico_nome', label:'Nome do síndico', grupo:'Informações da obra' },
+  { id:'edSindicoContato', campo:'sindico_contato', label:'Contato do síndico', grupo:'Informações da obra' },
+];
+
 async function loadClienteDetalhe(clienteId){
   clienteAtualId = clienteId;
   const [{ data: c }, { data: projetosVinculados }] = await Promise.all([
@@ -1991,7 +2187,10 @@ async function loadClienteDetalhe(clienteId){
     sb.from('projetos').select('id,nome,status').eq('cliente_id', clienteId).order('criado_em',{ascending:false}),
   ]);
   if(!c){ navigate('clientes'); return; }
+  dadosClienteAtual = c;
   document.getElementById('cdNome').textContent = c.nome_completo;
+  document.getElementById('cdBotaoEditar').textContent = 'Editar';
+  document.getElementById('cdBotaoEditar').setAttribute('onclick', 'ativarEdicaoCliente()');
 
   const linha = (label, valor) => valor ? `<tr><td style="color:var(--graphite);width:220px;">${label}</td><td>${esc(valor)}</td></tr>` : '';
   const listaProjetos = (projetosVinculados||[]).length === 0
@@ -2021,6 +2220,49 @@ async function loadClienteDetalhe(clienteId){
       ${linha('Síndico', c.sindico_nome)}${linha('Contato do síndico', c.sindico_contato)}
     </table>`;
 }
+
+function ativarEdicaoCliente(){
+  const c = dadosClienteAtual;
+  if(!c) return;
+
+  let grupoAtual = null;
+  const camposHtml = CAMPOS_CLIENTE.map(f => {
+    let html = '';
+    if(f.grupo !== grupoAtual){
+      grupoAtual = f.grupo;
+      if(grupoAtual) html += `<p class="label" style="margin-top:18px;">${esc(grupoAtual)}</p>`;
+    }
+    const valor = c[f.campo] || '';
+    html += `<label style="display:block;font-size:11px;color:var(--graphite);margin:8px 0 3px;">${esc(f.label)}</label>
+      <input id="${f.id}" type="${f.tipo||'text'}" value="${esc(valor)}" ${f.obrigatorio?'required':''} style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />`;
+    return html;
+  }).join('');
+
+  document.getElementById('cdBotaoEditar').textContent = 'Cancelar';
+  document.getElementById('cdBotaoEditar').setAttribute('onclick', `loadClienteDetalhe('${clienteAtualId}')`);
+
+  document.getElementById('cdConteudo').innerHTML = `
+    <form onsubmit="salvarEdicaoCliente(event)">
+      ${camposHtml}
+      <div class="form-actions" style="margin-top:20px;">
+        <button type="submit" class="btn">Salvar alterações</button>
+      </div>
+    </form>`;
+}
+
+async function salvarEdicaoCliente(e){
+  e.preventDefault();
+  const atualizacao = {};
+  CAMPOS_CLIENTE.forEach(f => {
+    const valor = document.getElementById(f.id).value.trim();
+    atualizacao[f.campo] = valor || null;
+  });
+  const resultado = await sb.from('clientes').update(atualizacao).eq('id', clienteAtualId);
+  if(checarErro(resultado, 'salvar cliente')) return;
+  loadClienteDetalhe(clienteAtualId);
+  loadClientes();
+}
+
 async function excluirClienteAtual(){
   if(!confirm('Excluir este cliente?')) return;
   await sb.from('clientes').delete().eq('id', clienteAtualId);
@@ -2073,8 +2315,7 @@ async function criarRedeSocial(e){
   loadConteudo();
 }
 async function excluirRedeSocial(id){
-  await sb.from('redes_sociais_config').delete().eq('id', id);
-  loadConteudo();
+  await excluirComConfirmacao('redes_sociais_config', id, 'essa rede social', () => loadConteudo());
 }
 
 function renderCalendarioConteudo(){
@@ -2149,12 +2390,12 @@ async function criarConteudo(e){
   loadConteudo();
 }
 async function atualizarStatusConteudo(id, status){
-  await sb.from('conteudo_posts').update({ status }).eq('id', id);
+  const r = await sb.from('conteudo_posts').update({ status }).eq('id', id);
+  if(checarErro(r, 'atualizar conteúdo')) return;
   loadConteudo();
 }
 async function excluirConteudo(id){
-  await sb.from('conteudo_posts').delete().eq('id', id);
-  loadConteudo();
+  await excluirComConfirmacao('conteudo_posts', id, 'esse conteúdo', () => loadConteudo());
 }
 
 /* ================= BUSCA GERAL ================= */
@@ -2258,8 +2499,7 @@ async function criarIdeia(e){
   loadIdeias();
 }
 async function excluirIdeia(id){
-  await sb.from('conteudo_ideias').delete().eq('id', id);
-  loadIdeias();
+  await excluirComConfirmacao('conteudo_ideias', id, 'essa referência', () => loadIdeias());
 }
 
 /* ================= CRONOGRAMA (Gantt) ================= */
@@ -2431,15 +2671,14 @@ async function adicionarAnexo(e){
   loadAnexos();
 }
 async function excluirAnexo(id){
-  await sb.from('anexos').delete().eq('id', id);
-  loadAnexos();
+  await excluirComConfirmacao('anexos', id, 'esse anexo', () => loadAnexos());
 }
 
 /* ================= MURAL DE RECADOS ================= */
 function renderRecados(recados){
   const cont = document.getElementById('listaRecados');
   if(recados.length===0){
-    cont.innerHTML = '<p class="muted" style="padding:4px;">Nenhum recado ainda — seja a primeira pessoa a deixar um "bom dia" por aqui.</p>';
+    cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhum recado ainda.</p>';
     return;
   }
   cont.innerHTML = recados.map((r, i) => {
@@ -2449,10 +2688,10 @@ function renderRecados(recados){
     const quando = mesmoDia
       ? d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' })
       : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
-    return `<div class="recado ${i % 2 === 0 ? 'tom-a' : 'tom-b'}">
+    return `<div class="recado">
       <div class="recado-topo">
         <span class="recado-autor">${esc(r.autor_nome)}</span>
-        <span class="recado-hora">${quando} · <button class="btn-ghost" style="padding:0;font-size:12px;color:var(--graphite);" onclick="excluirRecado('${r.id}')">remover</button></span>
+        <span class="recado-hora">${quando} · <button class="btn-ghost" style="padding:0;font-size:11px;color:var(--graphite);" onclick="excluirRecado('${r.id}')">remover</button></span>
       </div>
       <p class="recado-texto">${esc(r.texto)}</p>
     </div>`;
@@ -2471,8 +2710,7 @@ async function enviarRecado(e){
   loadInicio();
 }
 async function excluirRecado(id){
-  await sb.from('mural_recados').delete().eq('id', id);
-  loadInicio();
+  await excluirComConfirmacao('mural_recados', id, 'esse recado', () => loadInicio());
 }
 
 /* ================= DESPESAS (saídas) ================= */
@@ -2542,8 +2780,7 @@ async function marcarDespesaPaga(id){
   loadDespesas();
 }
 async function excluirDespesa(id){
-  await sb.from('despesas').delete().eq('id', id);
-  loadDespesas();
+  await excluirComConfirmacao('despesas', id, 'essa despesa', () => loadDespesas());
 }
 
 /* ================= AMBIENTES + CHECKLIST POR AMBIENTE ================= */
@@ -2588,7 +2825,10 @@ async function duplicarAmbiente(ambienteId, nomeAtual){
 }
 
 async function toggleChecklistItem(tarefaId, marcado){
-  const resultado = await sb.from('tarefas').update({ status: marcado ? 'concluida' : 'pendente' }).eq('id', tarefaId);
+  const resultado = await sb.from('tarefas').update({
+    status: marcado ? 'concluida' : 'pendente',
+    concluida_em: marcado ? new Date().toISOString() : null,
+  }).eq('id', tarefaId);
   if(checarErro(resultado, 'atualizar checklist')) return;
   loadProjetoDetalhe(projetoAtualId);
 }
@@ -3066,7 +3306,8 @@ async function iniciarNovaRevisaoChecklist(){
 }
 
 async function setStatusItemRevisao(itemId, status){
-  await sb.from('checklist_revisao_itens').update({ status }).eq('id', itemId);
+  const r = await sb.from('checklist_revisao_itens').update({ status }).eq('id', itemId);
+  if(checarErro(r, 'marcar item do checklist')) return;
   loadChecklistRevisao();
 }
 
@@ -3084,12 +3325,13 @@ async function atualizarCabecalhoRevisao(checklistId, revisadoPor, dataRevisao, 
   if(revisadoPor!==null) atualizacao.revisado_por = revisadoPor.trim() || null;
   if(dataRevisao!==null) atualizacao.data_revisao = dataRevisao || null;
   if(statusGeral!==null) atualizacao.status_geral = statusGeral;
-  await sb.from('checklist_revisao').update(atualizacao).eq('id', checklistId);
+  const r = await sb.from('checklist_revisao').update(atualizacao).eq('id', checklistId);
+  if(checarErro(r, 'atualizar revisão')) return;
   if(statusGeral!==null) loadChecklistRevisao();
 }
 
 /* ================= APROVAÇÕES DO CLIENTE (via portal) ================= */
-const TIPO_APROVACAO_LABEL = { briefing:'Briefing', estudo_preliminar:'Estudo Preliminar', executivo:'Projeto Executivo', imagens_3d:'Imagens 3D', outro:'Outro' };
+const TIPO_APROVACAO_LABEL = { briefing:'Briefing', estudo_preliminar:'Estudo Preliminar', executivo:'Projeto Executivo', imagens_3d:'Imagens 3D', dados_contrato:'Dados para o contrato', termo_anteprojeto:'Termo de Anteprojeto', termo_finalizacao:'Termo de Finalização', outro:'Outro' };
 const STATUS_APROVACAO_LABEL = { pendente:'Aguardando cliente', aprovado:'Aprovado', alteracoes:'Ajustes solicitados' };
 const STATUS_APROVACAO_COR = { pendente:'var(--clay)', aprovado:'var(--sage)', alteracoes:'var(--alert)' };
 
@@ -3131,7 +3373,7 @@ async function loadGaleria3D(){
 
 async function loadAprovacoes(){
   const [{ data: aprovacoes }, { data: etapas }] = await Promise.all([
-    sb.from('aprovacoes_cliente').select('id,tipo,titulo,descricao,status,comentario_cliente,data_resposta,criado_em,visto_pela_equipe,etapa_id,eh_checklist,etapas(nome),aprovacao_imagens(url),aprovacao_checklist_itens(id,item,marcado)').eq('projeto_id', projetoAtualId).order('criado_em', { ascending: false }),
+    sb.from('aprovacoes_cliente').select('id,tipo,titulo,descricao,status,comentario_cliente,data_resposta,criado_em,visto_pela_equipe,etapa_id,eh_checklist,dados_nome,dados_cpf,dados_rg,etapas(nome),aprovacao_imagens(url),aprovacao_checklist_itens(id,item,marcado)').eq('projeto_id', projetoAtualId).order('criado_em', { ascending: false }),
     sb.from('etapas').select('id,nome').eq('projeto_id', projetoAtualId),
   ]);
 
@@ -3163,7 +3405,7 @@ async function loadAprovacoes(){
         </div>
         <button class="remove-link" onclick="excluirAprovacao('${a.id}')">remover</button>
       </div>
-      ${a.descricao ? `<p style="font-size:12.5px;color:var(--graphite);margin:6px 0;">${esc(a.descricao)}</p>` : ''}
+      ${a.descricao ? `<p style="font-size:12.5px;color:var(--graphite);margin:6px 0;white-space:pre-wrap;">${esc(a.descricao)}</p>` : ''}
       ${(a.aprovacao_imagens||[]).length>0 ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;">${a.aprovacao_imagens.map(img => `<div class="proj-thumb" style="width:70px;height:70px;background-image:url('${esc(img.url)}');margin:0;"></div>`).join('')}</div>` : ''}
       ${a.eh_checklist ? `
         <div style="margin-top:8px;">
@@ -3172,6 +3414,16 @@ async function loadAprovacoes(){
             <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="imprimirChecklistAprovacao('${a.id}')">ver / imprimir</button>
           </div>
           ${itensChecklist.map(i => `<p style="font-size:12.5px;margin:2px 0;color:${i.marcado?'var(--sage)':'var(--graphite)'};">${i.marcado?'✓':'○'} ${esc(i.item)}${i.resposta_opcao ? ` — <b>${esc(i.resposta_opcao)}</b>` : ''}</p>`).join('')}
+        </div>
+      ` : a.tipo==='dados_contrato' ? `
+        <div style="margin-top:8px;">
+          ${a.status==='pendente'
+            ? '<p class="muted" style="font-size:12.5px;">Aguardando o cliente preencher pelo link dele.</p>'
+            : `<div style="background:var(--paper);border-radius:9px;padding:10px;">
+                <p style="font-size:13px;margin:0 0 4px;"><b>${esc(a.dados_nome||'')}</b></p>
+                <p style="font-size:12.5px;margin:0;color:var(--graphite);">CPF: ${esc(a.dados_cpf||'—')} · RG: ${esc(a.dados_rg||'—')}</p>
+                <p class="muted" style="font-size:11px;margin:6px 0 0;">Já atualizado automaticamente no cadastro do cliente.</p>
+              </div>`}
         </div>
       ` : `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
@@ -3281,6 +3533,7 @@ async function imprimirChecklistAprovacao(aprovacaoId){
     td:last-child{text-align:right;font-weight:600;}
     .sem-resposta{color:#9C948A;font-style:italic;font-weight:400;}</style>
     </head><body>
+    ${cabecalhoDocumentoHTML()}
     <h1>${esc(aprovacao.titulo)}</h1>
     <p style="color:#5C554C;">${esc(dadosProjetoAtual.nome)} · ${new Date(aprovacao.criado_em).toLocaleDateString('pt-BR')}</p>
     ${aprovacao.descricao ? `<p>${esc(aprovacao.descricao)}</p>` : ''}
@@ -3290,6 +3543,7 @@ async function imprimirChecklistAprovacao(aprovacaoId){
         ${itensGrupo.map(i => `<tr><td>${esc(i.nomeLimpo)}</td><td class="${i.resposta_opcao?'':'sem-resposta'}">${esc(i.resposta_opcao || (i.marcado?'Marcado':'—'))}</td></tr>`).join('')}
       </table>
     `).join('')}
+    ${rodapeDocumentoHTML()}
     </body></html>`);
   janela.document.close();
 }
@@ -3300,8 +3554,7 @@ async function marcarAprovacaoManual(id){
   loadAprovacoes();
 }
 async function excluirAprovacao(id){
-  await sb.from('aprovacoes_cliente').delete().eq('id', id);
-  loadAprovacoes();
+  await excluirComConfirmacao('aprovacoes_cliente', id, 'essa aprovação e tudo que o cliente já respondeu nela', () => loadAprovacoes());
 }
 
 /* ================= ORÇAMENTOS (dentro do projeto) ================= */
@@ -3384,8 +3637,7 @@ async function atualizarStatusOrcamentoProjeto(id, status){
   loadOrcamentosProjeto();
 }
 async function excluirOrcamentoProjeto(id){
-  await sb.from('orcamentos').delete().eq('id', id);
-  loadOrcamentosProjeto();
+  await excluirComConfirmacao('orcamentos', id, 'esse orçamento', () => loadOrcamentosProjeto());
 }
 
 /* ================= ATAS DE REUNIÃO ================= */
@@ -3427,8 +3679,7 @@ async function criarAta(e){
 }
 
 async function excluirAta(id){
-  await sb.from('atas_reuniao').delete().eq('id', id);
-  loadAtas();
+  await excluirComConfirmacao('atas_reuniao', id, 'essa ata de reunião', () => loadAtas());
 }
 
 function abrirAta(id){
@@ -3441,6 +3692,7 @@ function abrirAta(id){
     h1{font-size:21px;margin-bottom:4px;}h2{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:#5C554C;margin-top:28px;border-bottom:1px solid #E3DACD;padding-bottom:6px;}
     p{font-size:14px;white-space:pre-wrap;}</style>
     </head><body>
+    ${cabecalhoDocumentoHTML()}
     <h1>Ata de Reunião</h1>
     <p style="color:#5C554C;">${esc(dadosProjetoAtual.nome)} · ${fmtDataBR(a.data)}</p>
 
@@ -3455,6 +3707,7 @@ function abrirAta(id){
 
     <h2>Responsáveis</h2>
     <p>${esc(a.responsaveis || '—')}</p>
+    ${rodapeDocumentoHTML()}
     </body></html>`);
   janela.document.close();
 }
@@ -3834,6 +4087,36 @@ const BRIEFING_TEMPLATE = [
 ];
 
 let modoBriefingAtual = 'editar';
+let buscaBriefingAtual = '';
+
+/* Busca dentro do briefing: mostra as perguntas/respostas que batem com o termo,
+   sem precisar abrir seção por seção. */
+function filtrarBriefing(termo){
+  buscaBriefingAtual = termo;
+  const cont = document.getElementById('resultadosBuscaBriefing');
+  const t = termo.trim().toLowerCase();
+
+  // Some com as seções normais enquanto está buscando
+  document.querySelectorAll('#briefingConteudo > details').forEach(el => {
+    el.style.display = t.length >= 2 ? 'none' : '';
+  });
+
+  if(t.length < 2){ cont.innerHTML = ''; return; }
+
+  const achados = (window._briefingRespostas||[]).filter(r =>
+    (r.pergunta||'').toLowerCase().includes(t) || (r.resposta||'').toLowerCase().includes(t)
+  );
+
+  cont.innerHTML = achados.length===0
+    ? `<p class="muted" style="padding:10px;">Nada encontrado pra "${esc(termo)}".</p>`
+    : `<p class="muted" style="margin:0 0 10px;">${achados.length} resultado${achados.length>1?'s':''}</p>` +
+      achados.map(r => `
+        <div class="card" style="margin-bottom:8px;padding:14px;">
+          <p class="mono" style="font-size:10.5px;text-transform:uppercase;color:var(--terracotta);margin:0 0 4px;">${esc(r.secao)}${r.subgrupo?` · ${esc(r.subgrupo)}`:''}</p>
+          <label style="font-size:12.5px;color:var(--graphite);display:block;margin-bottom:4px;">${esc(r.pergunta)}</label>
+          <textarea rows="2" onblur="salvarRespostaBriefing('${r.id}', this.value)" placeholder="Resposta..." style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;font-family:inherit;">${esc(r.resposta||'')}</textarea>
+        </div>`).join('');
+}
 
 async function loadBriefing(){
   const cont = document.getElementById('briefingConteudo');
@@ -3868,7 +4151,10 @@ async function loadBriefing(){
         <button type="button" class="chip ${modoBriefingAtual==='resumo'?'on':''}" onclick="mudarModoBriefing('resumo')">Resumo</button>
       </div>
       ${modoBriefingAtual==='resumo' ? `<button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="imprimirBriefing()">Imprimir / PDF</button>` : ''}
-    </div>`;
+      ${modoBriefingAtual==='editar' ? `<button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="abrirAdicionarSecaoBriefing()">+ Adicionar seção</button>` : ''}
+    </div>
+    <input id="buscaBriefing" placeholder="Buscar no briefing (ex: cor de MDF, cooktop, iluminação...)" value="${esc(buscaBriefingAtual)}" oninput="filtrarBriefing(this.value)" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:13.5px;" />
+    <div id="resultadosBuscaBriefing"></div>`;
 
   if(modoBriefingAtual==='resumo'){
     const corpoResumo = secoes.map(secao => {
@@ -3921,6 +4207,7 @@ async function loadBriefing(){
   }).join('');
 
   cont.innerHTML = cabecalho + corpo;
+  if(buscaBriefingAtual.trim().length >= 2) filtrarBriefing(buscaBriefingAtual);
 }
 
 function mudarModoBriefing(modo){
@@ -3939,12 +4226,14 @@ function imprimirBriefing(){
     h1{font-size:21px;margin-bottom:4px;}h2{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:#5C554C;margin-top:26px;border-bottom:1px solid #E3DACD;padding-bottom:6px;}
     p.q{font-size:12.5px;color:#5C554C;margin:12px 0 0;}p.a{font-size:14px;margin:2px 0 0;white-space:pre-wrap;}</style>
     </head><body>
+    ${cabecalhoDocumentoHTML()}
     <h1>Briefing</h1>
     <p style="color:#5C554C;">${esc(dadosProjetoAtual.nome)}</p>
     ${secoes.map(secao => `
       <h2>${esc(secao)}</h2>
       ${respostas.filter(r => r.secao===secao).map(r => `<p class="q">${esc(r.pergunta)}</p><p class="a">${esc(r.resposta)}</p>`).join('')}
     `).join('')}
+    ${rodapeDocumentoHTML()}
     </body></html>`);
   janela.document.close();
 }
@@ -3966,6 +4255,50 @@ function abrirSelecaoBriefing(){
       <input type="checkbox" class="check-secao-briefing" value="${esc(s)}" checked style="width:16px;height:16px;accent-color:var(--terracotta);" />
       ${esc(s)}
     </label>`).join('');
+}
+
+function abrirAdicionarSecaoBriefing(){
+  const secoesAtuais = new Set((window._briefingRespostas||[]).map(r => r.secao));
+  const secoesFaltando = [...new Set(BRIEFING_TEMPLATE.map(g => g[0]))].filter(s => !secoesAtuais.has(s));
+
+  if(secoesFaltando.length===0){
+    alert('Todas as seções do modelo já estão nesse briefing. Se precisar de uma variação (ex: outro quarto), usa "duplicar seção" dentro da seção parecida.');
+    return;
+  }
+
+  abrirModal(`
+    <p class="label" style="margin-bottom:6px;">Adicionar seção que ficou de fora</p>
+    <p class="muted" style="margin-top:0;margin-bottom:14px;">Marca a(s) que você esqueceu de incluir — as perguntas padrão dela entram no briefing desse projeto.</p>
+    <div id="listaSecoesFaltando" style="max-height:320px;overflow-y:auto;margin-bottom:16px;">
+      ${secoesFaltando.map(s => `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13.5px;">
+          <input type="checkbox" class="check-secao-faltando" value="${esc(s)}" style="width:16px;height:16px;accent-color:var(--terracotta);" />
+          ${esc(s)}
+        </label>`).join('')}
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="confirmarAdicionarSecaoBriefing()">Adicionar seção(ões) marcada(s)</button>
+      <button class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+    </div>
+  `);
+}
+
+async function confirmarAdicionarSecaoBriefing(){
+  const secoesEscolhidas = Array.from(document.querySelectorAll('.check-secao-faltando:checked')).map(c => c.value);
+  if(secoesEscolhidas.length===0){ alert('Marca pelo menos uma seção.'); return; }
+
+  let ordem = Date.now();
+  const linhas = [];
+  BRIEFING_TEMPLATE.forEach(([secao, subgrupo, perguntas]) => {
+    if(!secoesEscolhidas.includes(secao)) return;
+    perguntas.forEach(pergunta => {
+      linhas.push({ projeto_id: projetoAtualId, secao, subgrupo, pergunta, ordem: ordem++ });
+    });
+  });
+  const resultado = await sb.from('briefing_respostas').insert(linhas);
+  if(checarErro(resultado, 'adicionar seção')) return;
+  fecharModalEditar();
+  loadBriefing();
 }
 
 async function confirmarIniciarBriefing(){
@@ -4033,7 +4366,8 @@ async function duplicarSecaoBriefing(secaoAtual){
 }
 
 async function salvarRespostaBriefing(id, texto){
-  await sb.from('briefing_respostas').update({ resposta: texto }).eq('id', id);
+  const r = await sb.from('briefing_respostas').update({ resposta: texto }).eq('id', id);
+  if(checarErro(r, 'salvar resposta do briefing')) return;
 }
 
 /* ================= CHECKLIST DE ARMÁRIOS (modelo pronto) ================= */
@@ -4098,3 +4432,766 @@ const CHECKLIST_ARMARIO_TEMPLATE = [
     ["Mala", ["Prateleira"]],
   ]],
 ];
+
+/* ================= CONTRATO (a partir do modelo padrão da SAMI) ================= */
+function valorPorExtenso(valor){
+  valor = Number(valor) || 0;
+  const inteiro = Math.floor(valor);
+  const centavos = Math.round((valor - inteiro) * 100);
+  const unidades = ['zero','um','dois','três','quatro','cinco','seis','sete','oito','nove'];
+  const dezDezenove = ['dez','onze','doze','treze','catorze','quinze','dezesseis','dezessete','dezoito','dezenove'];
+  const dezenas = ['','','vinte','trinta','quarenta','cinquenta','sessenta','setenta','oitenta','noventa'];
+  const centenas = ['','cento','duzentos','trezentos','quatrocentos','quinhentos','seiscentos','setecentos','oitocentos','novecentos'];
+
+  function centenaPorExtenso(n){
+    if(n===0) return '';
+    if(n===100) return 'cem';
+    const partes = [];
+    const c = Math.floor(n/100), resto = n%100;
+    if(c>0) partes.push(centenas[c]);
+    if(resto>0){
+      if(resto<10) partes.push(unidades[resto]);
+      else if(resto<20) partes.push(dezDezenove[resto-10]);
+      else {
+        const d = Math.floor(resto/10), u = resto%10;
+        partes.push(u>0 ? `${dezenas[d]} e ${unidades[u]}` : dezenas[d]);
+      }
+    }
+    return partes.join(' e ');
+  }
+  function grupoPorExtenso(n, singular, plural){
+    if(n===0) return '';
+    if(n===1) return `um ${singular}`;
+    return `${centenaPorExtenso(n)} ${plural}`;
+  }
+
+  const milhoes = Math.floor(inteiro/1000000);
+  const milhares = Math.floor((inteiro%1000000)/1000);
+  const restoFinal = inteiro%1000;
+  const grupos = [];
+  if(milhoes>0) grupos.push(grupoPorExtenso(milhoes,'milhão','milhões'));
+  if(milhares>0) grupos.push(milhares===1 ? 'mil' : `${centenaPorExtenso(milhares)} mil`);
+  if(restoFinal>0) grupos.push(centenaPorExtenso(restoFinal));
+
+  let textoInteiro;
+  if(grupos.length===0) textoInteiro = 'zero';
+  else if(grupos.length===1) textoInteiro = grupos[0];
+  else {
+    const ultima = grupos[grupos.length-1];
+    const anteriores = grupos.slice(0,-1);
+    const conector = (restoFinal>0 && restoFinal<100) ? ' e ' : ', ';
+    textoInteiro = anteriores.join(', ') + conector + ultima;
+  }
+
+  let resultado = `${textoInteiro} ${inteiro===1?'real':'reais'}`;
+  if(centavos>0){
+    resultado += ` e ${centenaPorExtenso(centavos) || unidades[centavos]} centavo${centavos===1?'':'s'}`;
+  }
+  return resultado;
+}
+
+const ESCOPO_PADRAO_CONTRATO = `- Concepção/ Projeto de Arquitetura e Interiores:
+
+1ª etapa - estudo preliminar (EP - Etapa destinada à concepção e à representação do conjunto de informações técnicas iniciais, necessárias à compreensão da configuração do layout, podendo incluir soluções alternativas):
+Produtos apresentados nessa etapa: Plantas de Layout - Dessa etapa é gerada algumas plantas com melhor posicionamento e layout para os espaços, dimensionando equipamentos e móveis conforme necessidade dos moradores e alinhamento das ideias iniciais. As revisões destinadas a essa fase são limitadas a uma.
+
+2ª etapa – anteprojeto (AP - Etapa destinada à concepção e à representação das informações técnicas provisórias de detalhamento do projeto e de seus elementos.)
+Produtos apresentados nessa etapa: Imagens 3D realistas dos ambientes a sofrerem modificação após alinhamento com os clientes.
+Nessa etapa as modificações/ revisões de projeto são ilimitadas, porém todas essas alterações precisam acontecer dentro dessa fase, já que após a aprovação completa dessa etapa pelo contratante não serão mais realizadas modificações dentro desse pacote de projeto.
+
+3ª etapa - projeto para execução (PE - Etapa destinada à concepção e à representação final das informações técnicas do projeto e de seus elementos, instalações e componentes, completas, necessárias à contratação e à execução dos serviços de obra correspondentes):
+-Elaboração do projeto para execução:
+a) Produtos a serem entregues:
+Levantamento de Necessidades e Briefing.
+Planta Baixa de Reforma: Desenvolvimento de planta baixa detalhada com layout otimizado, considerando as normas e os desejos do cliente.
+Projeto de Iluminação: Projeto completo de iluminação.
+Planta de Forro e Detalhamento de Gesso/Madeira: Projeto de forro, considerando o aproveitamento da iluminação e a estética desejada.
+Planta de Pisos e Revestimentos: Detalhamento da escolha de pisos e revestimentos, com plantas de paginação.
+Detalhamento de Marcenaria.
+Indicação de Decoração e Mobiliário: Sugestões para o estilo de decoração e indicação de móveis e elementos decorativos.
+Projeto de Pintura Personalizado: Definição de cores e acabamentos para pintura interna e externa da ampliação.
+Documentação em planta baixa 2D para posterior aprovação na prefeitura;
+
+Serviços adicionais a serem entregues conforme proposta:
+Indicações e orçamento em fornecedores parceiros;
+Acompanhamento em 01 loja para definições dos pisos e revestimentos;
+Uma visita no local para ambientação + fotografia;
+
+Após a entrega e aprovação do Projeto Executivo, o projeto será considerado finalizado. Qualquer modificação, ajuste ou revisão posterior será cobrada à parte, por Hora Técnica.
+Taxas provenientes de prefeitura para aprovação e regularização, não estão inclusas.
+O suporte para dúvidas e orientações relacionadas ao projeto será realizado via WhatsApp, de segunda a sexta-feira, das 9h às 18h;`;
+
+async function loadContrato(){
+  const [{ data: contratosExistentes }, { data: parcelas }, { data: configData }] = await Promise.all([
+    sb.from('contratos').select('*').eq('projeto_id', projetoAtualId).order('criado_em',{ascending:false}),
+    sb.from('financeiro_parcelas').select('descricao,valor,vencimento,forma_pagamento').eq('projeto_id', projetoAtualId).order('vencimento'),
+    sb.from('config_financeiro').select('link_pasta_contratos').eq('id', 1).maybeSingle(),
+  ]);
+  window._contratosProjeto = contratosExistentes || [];
+  window._parcelasContrato = parcelas || [];
+
+  if((contratosExistentes||[]).length === 0){
+    document.getElementById('ctEscopo').value = ESCOPO_PADRAO_CONTRATO;
+    document.getElementById('ctDataContrato').value = new Date().toISOString().slice(0,10);
+    if(dadosProjetoAtual?.cliente_id){
+      const { data: cliente } = await sb.from('clientes').select('nome_completo,cpf,rg').eq('id', dadosProjetoAtual.cliente_id).single();
+      if(cliente){
+        document.getElementById('ctNome').value = cliente.nome_completo || '';
+        document.getElementById('ctCpf').value = cliente.cpf || '';
+        document.getElementById('ctRg').value = cliente.rg || '';
+      }
+    }
+  } else {
+    const ultimo = contratosExistentes[0];
+    document.getElementById('ctNumero').value = ultimo.numero_contrato || '';
+    document.getElementById('ctNome').value = ultimo.cliente_nome || '';
+    document.getElementById('ctCpf').value = ultimo.cliente_cpf || '';
+    document.getElementById('ctRg').value = ultimo.cliente_rg || '';
+    document.getElementById('ctDescricaoObjeto').value = ultimo.descricao_objeto || '';
+    document.getElementById('ctEscopo').value = ultimo.escopo_projeto || ESCOPO_PADRAO_CONTRATO;
+    document.getElementById('ctValorHonorarios').value = ultimo.valor_honorarios ? String(ultimo.valor_honorarios).replace('.',',') : '';
+    document.getElementById('ctValorRRT').value = ultimo.valor_rrt ? String(ultimo.valor_rrt).replace('.',',') : '';
+    document.getElementById('ctPrazoEP').value = ultimo.prazo_ep || 14;
+    document.getElementById('ctPrazoAP').value = ultimo.prazo_ap || 25;
+    document.getElementById('ctPrazoPE').value = ultimo.prazo_pe || 30;
+    document.getElementById('ctCidadeForo').value = ultimo.cidade_foro || 'Jundiaí';
+    document.getElementById('ctDataContrato').value = new Date().toISOString().slice(0,10);
+  }
+
+  const linkPasta = configData?.link_pasta_contratos || '';
+  document.getElementById('listaContratos').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+      <p class="label" style="margin:0;">${(contratosExistentes||[]).length>0 ? 'Contratos já gerados' : ''}</p>
+      <div style="display:flex;gap:10px;">
+        ${linkPasta ? `<a href="${esc(linkPasta)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;padding:6px 12px;text-decoration:none;color:var(--ink);">Abrir pasta no OneDrive</a>` : ''}
+        <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="editarLinkPastaContratos()">${linkPasta?'trocar link da pasta':'+ vincular pasta do OneDrive'}</button>
+      </div>
+    </div>
+    ${(contratosExistentes||[]).map(c => `
+      <div class="quicklink-item">
+        <span style="cursor:pointer;" onclick="reimprimirContrato('${c.id}')">Contrato${c.numero_contrato?` nº ${esc(c.numero_contrato)}`:''} — ${esc(c.cliente_nome||'')}</span>
+        <span style="display:flex;gap:10px;align-items:center;">
+          <button class="edit-link" onclick="reimprimirContrato('${c.id}')">PDF</button>
+          <button class="edit-link" onclick="baixarContratoWord('${c.id}')">Word</button>
+          <span class="badge line">${c.data_contrato?fmtDataBR(c.data_contrato):''}</span>
+        </span>
+      </div>`).join('')}`;
+}
+
+async function editarLinkPastaContratos(){
+  const { data: cfg } = await sb.from('config_financeiro').select('link_pasta_contratos').eq('id',1).maybeSingle();
+  const atual = cfg?.link_pasta_contratos || '';
+  const novo = prompt('Cole o link da pasta de contratos no OneDrive:\n(no OneDrive: abra a pasta → Compartilhar → Copiar link)', atual);
+  if(novo===null) return;
+  const resultado = await sb.from('config_financeiro').update({ link_pasta_contratos: novo.trim() || null }).eq('id', 1);
+  if(checarErro(resultado, 'salvar link da pasta')) return;
+  loadContrato();
+}
+
+async function salvarEImprimirContrato(e){
+  e.preventDefault();
+  const valorHonorarios = parseValorBR(document.getElementById('ctValorHonorarios').value);
+  if(isNaN(valorHonorarios)){ alert('Digita o valor dos honorários.'); return; }
+  const dados = {
+    projeto_id: projetoAtualId,
+    numero_contrato: document.getElementById('ctNumero').value.trim() || null,
+    cliente_nome: document.getElementById('ctNome').value.trim(),
+    cliente_cpf: document.getElementById('ctCpf').value.trim() || null,
+    cliente_rg: document.getElementById('ctRg').value.trim() || null,
+    descricao_objeto: document.getElementById('ctDescricaoObjeto').value.trim() || null,
+    escopo_projeto: document.getElementById('ctEscopo').value,
+    valor_honorarios: valorHonorarios,
+    valor_rrt: document.getElementById('ctValorRRT').value.trim() ? parseValorBR(document.getElementById('ctValorRRT').value) : null,
+    prazo_ep: Number(document.getElementById('ctPrazoEP').value) || 14,
+    prazo_ap: Number(document.getElementById('ctPrazoAP').value) || 25,
+    prazo_pe: Number(document.getElementById('ctPrazoPE').value) || 30,
+    cidade_foro: document.getElementById('ctCidadeForo').value.trim() || 'Jundiaí',
+    data_contrato: document.getElementById('ctDataContrato').value || new Date().toISOString().slice(0,10),
+  };
+  const resultado = await sb.from('contratos').insert(dados).select('*').single();
+  if(checarErro(resultado, 'salvar contrato')) return;
+  imprimirContrato(resultado.data, window._parcelasContrato||[]);
+  loadContrato();
+}
+
+function reimprimirContrato(id){
+  const c = (window._contratosProjeto||[]).find(x => x.id===id);
+  if(!c) return;
+  imprimirContrato(c, window._parcelasContrato||[]);
+}
+
+function formatarParcelasContrato(parcelas){
+  if(!parcelas || parcelas.length===0){
+    return '<p>(Nenhuma parcela lançada em Financeiro pra esse projeto ainda — lança as parcelas na aba Financeiro do projeto pra elas aparecerem aqui automaticamente.)</p>';
+  }
+  return '<p>Parcelando-se os pagamentos em valores fixos:</p><ul>' +
+    parcelas.map(p => `<li>${esc(p.descricao||'Parcela')} – ${fmtMoeda(p.valor)} (${valorPorExtenso(p.valor)}) – ${fmtDataBR(p.vencimento)}${p.forma_pagamento?` via ${esc(p.forma_pagamento)}`:''};</li>`).join('') +
+    '</ul>';
+}
+
+function montarHTMLContrato(c, parcelas){
+  const dataC = new Date(c.data_contrato+'T00:00:00');
+  const dataExtenso = `${String(dataC.getDate()).padStart(2,'0')} de ${MESES[dataC.getMonth()].toLowerCase()} de ${dataC.getFullYear()}`;
+  return `
+    <html><head><meta charset="utf-8" /><title>Contrato — ${esc(c.cliente_nome)}</title>
+    <style>body{font-family:Georgia,serif;max-width:720px;margin:50px auto;color:#211C18;line-height:1.6;padding:0 20px;}
+    h1{font-size:16px;text-align:center;margin-bottom:24px;}
+    h2{font-size:13px;text-transform:uppercase;letter-spacing:.03em;margin-top:22px;margin-bottom:6px;}
+    p,li{font-size:13px;text-align:justify;white-space:pre-wrap;}
+    ul{margin:6px 0;padding-left:20px;}
+    .assinaturas{margin-top:70px;display:flex;flex-direction:column;gap:50px;}
+    .linha-assinatura{border-top:1px solid #999;width:340px;padding-top:6px;font-size:12.5px;text-align:center;}
+    </style>
+    </head><body>
+    ${cabecalhoDocumentoHTML()}
+    <h1>CONTRATO DE ELABORAÇÃO DE PROJETO DE ARQUITETURA DE INTERIORES${c.numero_contrato ? ` — Nº ${esc(c.numero_contrato)}` : ''}</h1>
+
+    <p>Pelo presente instrumento particular, de um lado ${esc(c.cliente_nome)}${c.cliente_cpf?`, CPF n° ${esc(c.cliente_cpf)}`:''}${c.cliente_rg?`, RG n° ${esc(c.cliente_rg)}`:''}, doravante denominado simplesmente CONTRATANTE, e, de outro, a Arquiteta Mirella Sacha Matilde, inscrito no Conselho de Arquitetura e Urbanismo - CAU sob o nºA277813-0, CPF nº 455.196.998-28, RG nº 39.084.204-7 e, a Arquiteta Sabrina Coelho Alves de Andrade, inscrito no Conselho de Arquitetura e Urbanismo – CAU sob o n°A289541-2, CPF n°450.757.698-96, RG n°46.662.536-4, com escritório profissional online, intitulado SAMI Arquitetura, doravante denominado simplesmente CONTRATADO, têm, entre si, como justo e acertado o seguinte:</p>
+
+    <h2>Cláusula 1ª - Do objeto</h2>
+    <p>O CONTRATANTE ajusta com o CONTRATADO a ${esc(c.descricao_objeto || '')}</p>
+
+    <h2>Cláusula 2ª - Da especificação do serviço</h2>
+    <p>O projeto é a atividade que envolve a materialização dos meios através dos princípios técnicos, visando a consecução de um objetivo, adequando-se aos recursos disponíveis e às alternativas que conduzem à viabilidade de decisão.</p>
+    <p>O projeto de arquitetura de interiores, ora contratado contempla o escopo de trabalho relacionado abaixo:</p>
+    <p>${esc(c.escopo_projeto || '')}</p>
+
+    <h2>Cláusula 3ª - Dos honorários do contratado</h2>
+    <p>Para execução dos serviços descritos neste contrato, será devida pelo CONTRATANTE a importância de ${fmtMoeda(c.valor_honorarios)} (${valorPorExtenso(c.valor_honorarios)}), referente ao desenvolvimento do Projeto Completo.</p>
+
+    <h2>Cláusula 4ª - Da forma de pagamento</h2>
+    <p>I. Os honorários definidos acima serão pagos nas seguintes condições:</p>
+    ${formatarParcelasContrato(parcelas)}
+    ${c.valor_rrt ? `<p>II. RRT para início das obras contratado a parte no valor de ${fmtMoeda(c.valor_rrt)}.</p>` : ''}
+    <p>Conta para depósito Agência 0001 - CC 41399104-3 Banco 290 – Pag Seguro ou transferência PIX pelo e-mail samiarquitetura@gmail.com, sendo a mesma conta.</p>
+
+    <h2>Cláusula 5ª - Do reajuste</h2>
+    <p>No caso de ser efetuada qualquer interrupção ou atraso nos serviços contratados, em decorrência de motivos alheios à vontade do CONTRATADO, fica acordado que, quando do reinício destes, o preço estabelecido supracitado, deverá ser reajustado conforme o índice financeiro em 10% de modo a manter-se o equilíbrio econômico-financeiro da relação, respeitando-se o valor do contrato expresso acima.</p>
+
+    <h2>Cláusula 6ª - Do atraso</h2>
+    <p>Caso os pagamentos não sejam efetuados nos prazos e modos estipulados neste Contrato, sobre as parcelas em mora incidirão multa de 2% (dois por cento), mais juros de 1% ao mês, e após 30 dias de atraso sem justificativa o nome do CONTRATANTE irá para protesto. O CONTRATADO não ficará obrigado a dar continuidade ao serviço, enquanto durar o atraso nos pagamentos.</p>
+
+    <h2>Cláusula 7ª - Do comprovante de recebimento de honorários</h2>
+    <p>Será fornecido um recibo para comprovação do recebimento de cada parcela referente a este contrato.</p>
+
+    <h2>Cláusula 8ª - Dos prazos para entrega dos serviços</h2>
+    <p>1ª etapa - estudos preliminares: prazo estipulado ${c.prazo_ep} dias úteis, após reunião de briefing;
+2ª etapa - anteprojeto: prazo até dia ${c.prazo_ap} dias úteis, o mesmo é iniciado logo após as aprovações de layout dos estudos preliminares, podendo esta data ser antecipada dependendo do volume de alterações que serão realizadas nessa etapa;
+3ª etapa - projeto para execução: prazo até ${c.prazo_pe} dias úteis, para elaboração de todos os desenhos para orçamento e execução de toda a obra;*</p>
+    <p style="font-size:11.5px;color:#5C554C;">*Datas não especificadas, por conta da reunião de briefing, após ser definido, será enviado um cronograma para os clientes com as datas especificadas.</p>
+
+    <h2>Cláusula 9ª – Das visitas técnicas</h2>
+    <p>As visitas técnicas, quando contratadas, serão realizadas mediante agendamento prévio, com antecedência mínima de 5 (cinco) dias úteis, e de acordo com a disponibilidade de agenda do CONTRATADO.</p>
+    <p>Cada visita técnica terá duração aproximada de 01 (uma) hora.</p>
+
+    <h2>Cláusula 10ª - Das disposições gerais</h2>
+    <p><b>DOCUMENTOS:</b> serão fornecidos pelo CONTRATANTE todos os elementos necessários ao eficiente desempenho profissional do CONTRATADO.</p>
+    <p><b>MODIFICAÇÕES:</b> quando o CONTRATANTE solicitar modificações em trabalhos correspondentes a etapas já concluídas e entregues, deverão estas ser objeto de novo contrato, e o valor de remuneração poderá ser calculado em Horas Técnicas (HT) R$ 150,00.</p>
+    <p><b>UTILIZAÇÃO DO PROJETO:</b> o projeto, ou qualquer uma de suas partes, somente poderá ser utilizado para o fim e o local indicados nos documentos e desenhos apresentados.</p>
+    <p><b>ORÇAMENTOS:</b> caso solicitado, o CONTRATADO poderá orçar para o CONTRATANTE a elaboração de projetos complementares, não abrangidos nesta proposta. Neste caso será considerado serviço agregado.</p>
+    <p><b>DESPESAS:</b> esta proposta não inclui o pagamento de taxas e emolumentos de Cartório, Prefeitura e outros. Quando ocorrerem estas, o CONTRATANTE as reembolsará, sendo tais pagamentos independentes dos previstos acima.</p>
+    <p>Observação: o CONTRATANTE reembolsará as despesas de deslocamento (transporte, alimentação e hospedagem) para serviços prestados fora de seu perímetro de atuação.</p>
+    <p><b>PUBLICIDADE:</b> qualquer matéria de publicidade ou propaganda com imagens gráficas e/ ou fotográficas, relacionada com o produto desta proposta, deverá fazer menção destacada do nome do CONTRATADO e autor do projeto de arquitetura de interiores. O CONTRATADO também tem o direito de utilizar o objeto desta proposta para promoção própria, conforme sua conveniência, (Lei Federal nº 12.378/2010; Lei de Direito Autoral nº 9.610/98, Resolução CAU/BR nº 67 e Resolução CAU/BR nº 75).</p>
+    <p><b>RESPEITO AO DIREITO AUTORAL:</b> De acordo com a Lei nº 12.378/2010 (art. 16) e a Lei Federal nº 9.610/1998 (Lei de Direitos Autorais), o CONTRATADO se compromete a obter, quando necessário, as autorizações por escrito de outros autores envolvidos, para garantir o desenvolvimento do projeto contratado. Essas autorizações, quando existirem, farão parte deste contrato.</p>
+    <p>Caso os trabalhos sejam interrompidos nas etapas iniciais (estudo preliminar ou anteprojeto), o CONTRATANTE não está autorizado a executar, total ou parcialmente, o projeto desenvolvido, sem a autorização prévia e por escrito do CONTRATADO.</p>
+    <p>Após a conclusão completa das três etapas contratadas, o CONTRATANTE terá o direito de executar o projeto com o profissional ou empresa de sua preferência. Entretanto, não é permitido realizar alterações no projeto, salvo adaptações necessárias, que deverão ser previamente comunicadas e autorizadas pela arquiteta responsável.</p>
+    <p><b>RESPONSABILIDADE:</b> o CONTRATADO é responsável exclusivamente pela elaboração do projeto, não se responsabilizando pela execução da obra, mão de obra, custos, prazos, materiais, fornecedores ou segurança do trabalho.</p>
+    <p><b>ALTERAÇÕES NÃO AUTORIZADAS:</b> quaisquer alterações realizadas sem anuência formal descaracterizam o projeto e isentam o CONTRATADO de responsabilidade técnica, civil ou financeira.</p>
+    <p><b>VISITAS:</b> quando previstas em proposta, deverão ser agendadas com antecedência mínima de 5 dias úteis e estão sujeitas à disponibilidade de agenda.</p>
+    <p><b>RESCISÃO:</b> o contrato poderá ser rescindido por qualquer das partes mediante comunicação por escrito. Em caso de rescisão pelo CONTRATANTE, os valores pagos não serão reembolsáveis, sendo devidos os serviços já executados. Em caso de rescisão pelo CONTRATADO, serão entregues os materiais correspondentes às etapas pagas.</p>
+
+    <h2>Cláusula II - Do foro</h2>
+    <p>Fica eleito o foro do Município de ${esc(c.cidade_foro)}, para a solução de questões oriundas do presente contrato, renunciando as partes a qualquer outro a que, porventura, tenham ou possam vir a ter direito.</p>
+
+    <p>E, por estarem assim, justos e contratados, firmam o presente instrumento em duas vias de igual teor e forma.</p>
+    <p>${esc(c.cidade_foro)}, ${dataExtenso}.</p>
+
+    <div class="assinaturas">
+      <div class="linha-assinatura">CONTRATANTE<br>${esc(c.cliente_nome)}</div>
+      <div class="linha-assinatura">CONTRATADA<br>Mirella Sacha Matilde<br>SAMI Arquitetura</div>
+      <div class="linha-assinatura">CONTRATADA<br>Sabrina Coelho Alves de Andrade<br>SAMI Arquitetura</div>
+    </div>
+    ${rodapeDocumentoHTML()}
+    </body></html>`;
+}
+
+function imprimirContrato(c, parcelas){
+  const janela = window.open('', '_blank');
+  janela.document.write(montarHTMLContrato(c, parcelas));
+  janela.document.close();
+}
+
+/* Baixa o contrato como arquivo que o Word abre (pra editar no Word Online / OneDrive) */
+function baixarContratoWord(id){
+  const c = (window._contratosProjeto||[]).find(x => x.id===id);
+  if(!c) return;
+  const html = montarHTMLContrato(c, window._parcelasContrato||[]);
+  const blob = new Blob(['\ufeff', html], { type:'application/msword;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  const nomeLimpo = (c.cliente_nome||'contrato').replace(/[^a-zA-Z0-9 ]/g,'').trim().replace(/\s+/g,'-');
+  link.download = `contrato-${c.numero_contrato||''}-${nomeLimpo}.doc`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ================= RECIBO DE PAGAMENTO ================= */
+async function imprimirRecibo(parcelaId){
+  const { data: p } = await sb
+    .from('financeiro_parcelas')
+    .select('descricao,valor,vencimento,data_pagamento,forma_pagamento,projetos(nome,clientes(nome_completo))')
+    .eq('id', parcelaId)
+    .single();
+  if(!p) return;
+
+  const dataPg = p.data_pagamento ? new Date(p.data_pagamento+'T00:00:00') : new Date();
+  const dataExtenso = `${String(dataPg.getDate()).padStart(2,'0')} de ${MESES[dataPg.getMonth()].toLowerCase()} de ${dataPg.getFullYear()}`;
+  const nomeCliente = p.projetos?.clientes?.nome_completo || '';
+  const nomeProjeto = p.projetos?.nome || '';
+
+  const janela = window.open('', '_blank');
+  janela.document.write(`
+    <html><head><title>Recibo — ${esc(nomeCliente)}</title>
+    <style>body{font-family:Georgia,serif;max-width:640px;margin:60px auto;color:#211C18;line-height:1.7;padding:0 20px;}
+    h1{font-size:18px;text-align:center;margin-bottom:30px;}
+    p{font-size:14px;text-align:justify;}
+    .valor-destaque{font-size:22px;font-weight:700;text-align:center;margin:24px 0;font-family:Georgia,serif;}
+    .assinatura{margin-top:70px;border-top:1px solid #999;width:340px;padding-top:8px;font-size:13px;text-align:center;margin-left:auto;margin-right:auto;}
+    </style>
+    </head><body>
+    ${cabecalhoDocumentoHTML()}
+    <h1>RECIBO DE PAGAMENTO</h1>
+
+    <p>Recebi de <b>${esc(nomeCliente)}</b> a importância de:</p>
+    <p class="valor-destaque">${fmtMoeda(p.valor)}<br><span style="font-size:13px;font-weight:400;">(${valorPorExtenso(p.valor)})</span></p>
+    <p>Referente a: <b>${esc(p.descricao || 'Parcela')}</b>${nomeProjeto ? ` — projeto ${esc(nomeProjeto)}` : ''}.</p>
+    ${p.forma_pagamento ? `<p>Forma de pagamento: ${esc(p.forma_pagamento)}.</p>` : ''}
+    <p>Para maior clareza, firmamos o presente recibo, dando plena e total quitação do valor acima referido.</p>
+
+    <p style="margin-top:30px;">Jundiaí, ${dataExtenso}.</p>
+
+    <div class="assinatura">SAMI Arquitetura</div>
+    ${rodapeDocumentoHTML()}
+    </body></html>`);
+  janela.document.close();
+}
+
+/* ================= TERMO DE ACEITE FINAL + AUTORIZAÇÃO DE USO DE IMAGEM ================= */
+async function gerarTermoFinal(){
+  if(!dadosProjetoAtual) return;
+  const p = dadosProjetoAtual;
+  const nomeCliente = p.clientes?.nome_completo || p.cliente || '(cliente não vinculado)';
+  const hoje = new Date();
+  const dataExtenso = `${String(hoje.getDate()).padStart(2,'0')} de ${MESES[hoje.getMonth()].toLowerCase()} de ${hoje.getFullYear()}`;
+
+  const janela = window.open('', '_blank');
+  janela.document.write(`
+    <html><head><title>Termo de Aceite Final — ${esc(p.nome)}</title>
+    <style>body{font-family:Georgia,serif;max-width:680px;margin:60px auto;color:#211C18;line-height:1.7;padding:0 20px;}
+    h1{font-size:19px;text-align:center;margin-bottom:30px;}p{font-size:14px;text-align:justify;}
+    .assinatura{margin-top:80px;border-top:1px solid #999;width:340px;padding-top:8px;font-size:13px;text-align:center;}</style>
+    </head><body>
+    ${cabecalhoDocumentoHTML()}
+    <h1>TERMO DE ACEITE FINAL DE PROJETO</h1>
+    <p><b>Projeto:</b> ${esc(p.nome)}</p>
+    <p><b>Cliente:</b> ${esc(nomeCliente)}</p>
+    <p>Declaramos, para os devidos fins, que o projeto acima identificado foi concluído e entregue pela SAMI Arquitetura em todas as suas etapas contratadas (Estudo Preliminar, Anteprojeto e Projeto Executivo), e que o(a) cliente teve a oportunidade de revisar, acompanhar e aprovar o conteúdo apresentado em cada uma dessas fases.</p>
+    <p>Este documento formaliza o encerramento do escopo de projeto contratado, servindo como registro de aceite e quitação das obrigações de entrega por parte da CONTRATADA, nos termos do contrato firmado entre as partes.</p>
+    <p style="margin-top:30px;">Jundiaí, ${dataExtenso}.</p>
+    <div class="assinatura">Assinatura do cliente</div>
+    ${rodapeDocumentoHTML()}
+    </body></html>`);
+  janela.document.close();
+}
+async function marcarTermoFinalAssinado(){
+  const resultado = await sb.from('projetos').update({ termo_final_status:'assinado', termo_final_data: new Date().toISOString().slice(0,10) }).eq('id', projetoAtualId);
+  if(checarErro(resultado, 'marcar termo final')) return;
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+async function gerarAutorizacaoImagem(){
+  if(!dadosProjetoAtual) return;
+  const p = dadosProjetoAtual;
+  const nomeCliente = p.clientes?.nome_completo || p.cliente || '(cliente não vinculado)';
+  const hoje = new Date();
+  const dataExtenso = `${String(hoje.getDate()).padStart(2,'0')} de ${MESES[hoje.getMonth()].toLowerCase()} de ${hoje.getFullYear()}`;
+
+  const janela = window.open('', '_blank');
+  janela.document.write(`
+    <html><head><title>Autorização de Uso de Imagem — ${esc(p.nome)}</title>
+    <style>body{font-family:Georgia,serif;max-width:680px;margin:60px auto;color:#211C18;line-height:1.7;padding:0 20px;}
+    h1{font-size:19px;text-align:center;margin-bottom:30px;}p{font-size:14px;text-align:justify;}
+    .assinatura{margin-top:80px;border-top:1px solid #999;width:340px;padding-top:8px;font-size:13px;text-align:center;}</style>
+    </head><body>
+    ${cabecalhoDocumentoHTML()}
+    <h1>AUTORIZAÇÃO DE USO DE IMAGEM</h1>
+    <p><b>Projeto:</b> ${esc(p.nome)}</p>
+    <p><b>Cliente:</b> ${esc(nomeCliente)}</p>
+    <p>Eu, ${esc(nomeCliente)}, autorizo a SAMI Arquitetura a utilizar, de forma gratuita e por prazo indeterminado, as imagens fotográficas e/ou audiovisuais do projeto acima identificado, para fins de divulgação profissional em portfólio, redes sociais, site e demais materiais de marketing do escritório.</p>
+    <p>Esta autorização está amparada pela Lei Federal nº 12.378/2010 (art. 16) e pela Lei Federal nº 9.610/1998 (Lei de Direitos Autorais), que resguardam ao autor do projeto de arquitetura o direito de utilizar o objeto de sua autoria para promoção própria.</p>
+    <p>Fica resguardado o direito do CONTRATANTE de solicitar, a qualquer momento e por escrito, a não utilização de imagens específicas que identifiquem elementos de privacidade pessoal.</p>
+    <p style="margin-top:30px;">Jundiaí, ${dataExtenso}.</p>
+    <div class="assinatura">Assinatura do cliente</div>
+    ${rodapeDocumentoHTML()}
+    </body></html>`);
+  janela.document.close();
+}
+async function marcarAutorizacaoImagemAssinada(){
+  const resultado = await sb.from('projetos').update({ autorizacao_imagem_status:'assinado', autorizacao_imagem_data: new Date().toISOString().slice(0,10) }).eq('id', projetoAtualId);
+  if(checarErro(resultado, 'marcar autorização de imagem')) return;
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+/* ================= GERADORES DE TERMO (via aprovação do cliente) ================= */
+const LISTA_ENTREGAS_PADRAO_FINALIZACAO = `Planta baixa com layout otimizado + moodboard de referências;
+Projeto de iluminação completo;
+Projeto de forro de gesso;
+Projeto e detalhamento de marmoraria;
+Projeto e detalhamento de marcenaria;
+Planta de paginação dos revestimentos;
+Indicação de mobiliários;
+Memorial descritivo de decoração;
+Projeto de pintura personalizado;
+Imagens 3D realistas;
+Indicações de fornecedores parceiros;
+Shop list de itens decorativos;
+Acompanhamento em 01 loja para definições dos pisos e revestimentos;
+Uma visita para alinhamento com os prestadores/construtora antes da construção;
+Uma visita no local para ambientação + fotografia;`;
+
+async function dadosBaseParaTermo(){
+  const { data: ultimoContrato } = await sb.from('contratos').select('numero_contrato,data_contrato,cliente_nome,cliente_cpf').eq('projeto_id', projetoAtualId).order('criado_em',{ascending:false}).limit(1).maybeSingle();
+  let clienteNome = ultimoContrato?.cliente_nome || dadosProjetoAtual?.clientes?.nome_completo || '';
+  let clienteCpf = ultimoContrato?.cliente_cpf || '';
+  if(!clienteCpf && dadosProjetoAtual?.cliente_id){
+    const { data: cli } = await sb.from('clientes').select('nome_completo,cpf').eq('id', dadosProjetoAtual.cliente_id).single();
+    if(cli){ clienteNome = clienteNome || cli.nome_completo; clienteCpf = cli.cpf || ''; }
+  }
+  return {
+    numero: ultimoContrato?.numero_contrato || '',
+    data: ultimoContrato?.data_contrato || '',
+    clienteNome, clienteCpf,
+  };
+}
+
+function dataContratoExtenso(dataStr){
+  if(!dataStr) return '____/____/______';
+  const d = new Date(dataStr+'T00:00:00');
+  return `${String(d.getDate()).padStart(2,'0')} de ${MESES[d.getMonth()].toLowerCase()} de ${d.getFullYear()}`;
+}
+
+async function abrirGeradorTermoAnteprojeto(){
+  const base = await dadosBaseParaTermo();
+  abrirModal(`
+    <p class="label" style="margin-bottom:14px;">Gerar Termo de Finalização do Anteprojeto</p>
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Nº do contrato</label>
+    <input id="gtNumeroContrato" value="${esc(base.numero)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Data do contrato</label>
+    <input id="gtDataContrato" type="date" value="${esc(base.data)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Cliente</label>
+    <input id="gtClienteNome" value="${esc(base.clienteNome)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">CPF</label>
+    <input id="gtClienteCpf" value="${esc(base.clienteCpf)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Valor da hora técnica (pra alterações após o início do Executivo)</label>
+    <input id="gtValorHT" placeholder="Ex: 150,00" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:16px;" />
+    <div class="form-actions">
+      <button class="btn" onclick="confirmarGeradorTermoAnteprojeto()">Gerar e preencher aprovação</button>
+      <button class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+    </div>
+  `);
+}
+
+function confirmarGeradorTermoAnteprojeto(){
+  const numero = document.getElementById('gtNumeroContrato').value.trim();
+  const data = document.getElementById('gtDataContrato').value;
+  const nome = document.getElementById('gtClienteNome').value.trim();
+  const cpf = document.getElementById('gtClienteCpf').value.trim();
+  const valorHT = document.getElementById('gtValorHT').value.trim() || '150,00';
+
+  const texto = `Conforme o Contrato nº ${numero || '____'}, firmado em ${dataContratoExtenso(data)}, e considerando as demais solicitações e definições previamente aprovadas, as partes, Sra./Sr. ${nome}${cpf?` CPF: ${cpf}`:''}, doravante denominada CONTRATANTE, e SAMI Arquitetura e Interiores, doravante denominada CONTRATADA, declaram e concordam que a etapa de Anteprojeto foi concluída e devidamente aprovada pela CONTRATANTE, estando o projeto apto a avançar para a etapa de detalhamento do Projeto Executivo, conforme as condições estabelecidas neste termo.
+
+1. APROVAÇÃO DAS DEFINIÇÕES
+Declaro, para os devidos fins, que os ambientes e as definições de layout, conceito e diretrizes do projeto foram apresentados e aprovados, estando o projeto apto a avançar para a etapa de detalhamento do Projeto Executivo.
+A partir desta aprovação, o projeto seguirá para o desenvolvimento dos detalhamentos necessários à execução, tomando como base as definições previamente aprovadas.
+
+2. ALTERAÇÕES APÓS O INÍCIO DO PROJETO EXECUTIVO
+Após o início da etapa de Projeto Executivo, não serão consideradas alterações de layout, conceito ou demais definições já aprovadas. Eventuais solicitações de alteração feitas a partir desta etapa serão tratadas como serviço adicional.
+As alterações solicitadas serão cobradas mediante hora técnica, no valor de R$ ${valorHT} por hora.
+
+3. CIÊNCIA E ACEITE
+Ao aprovar este termo pelo link, o(a) cliente declara estar ciente de que as definições aprovadas serão utilizadas como base para o detalhamento do Projeto Executivo e concorda com as condições estabelecidas neste documento.
+
+RESPONSÁVEIS TÉCNICAS
+Arquiteta Sabrina Coelho Alves de Andrade — CAU: A289541-2
+Arquiteta Mirella Sacha Matilde — CAU: A277813-0`;
+
+  fecharModalEditar();
+  preencherFormularioAprovacaoComTexto('termo_anteprojeto', 'Termo de Finalização do Anteprojeto', texto);
+}
+
+async function abrirGeradorTermoFinalizacao(){
+  const base = await dadosBaseParaTermo();
+  abrirModal(`
+    <p class="label" style="margin-bottom:14px;">Gerar Termo de Aceite e Finalização de Projeto</p>
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Nº do contrato</label>
+    <input id="gtNumeroContrato" value="${esc(base.numero)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Data do contrato</label>
+    <input id="gtDataContrato" type="date" value="${esc(base.data)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Contratante(s)</label>
+    <input id="gtClienteNome" value="${esc(base.clienteNome)}" placeholder="Ex: Viviane Cristina Cabrera e Henrique dos Santos Pereira" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">CPF</label>
+    <input id="gtClienteCpf" value="${esc(base.clienteCpf)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Link do Google Drive com o material (opcional)</label>
+    <input id="gtLinkDrive" placeholder="https://drive.google.com/..." style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+    <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Material entregue (um item por linha — ajusta conforme o pacote desse projeto)</label>
+    <textarea id="gtListaEntregas" rows="8" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:16px;font-size:12.5px;">${esc(LISTA_ENTREGAS_PADRAO_FINALIZACAO)}</textarea>
+    <div class="form-actions">
+      <button class="btn" onclick="confirmarGeradorTermoFinalizacao()">Gerar e preencher aprovação</button>
+      <button class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+    </div>
+  `);
+}
+
+function confirmarGeradorTermoFinalizacao(){
+  const numero = document.getElementById('gtNumeroContrato').value.trim();
+  const data = document.getElementById('gtDataContrato').value;
+  const nome = document.getElementById('gtClienteNome').value.trim();
+  const cpf = document.getElementById('gtClienteCpf').value.trim();
+  const linkDrive = document.getElementById('gtLinkDrive').value.trim();
+  const itensEntrega = document.getElementById('gtListaEntregas').value.split('\n').map(i=>i.trim()).filter(Boolean);
+
+  const texto = `Conforme contrato nº ${numero || '____'}, datado em ${dataContratoExtenso(data)} e demais solicitações aprovadas, as partes ${nome}${cpf?`, portador(a) do CPF ${cpf}`:''}, denominado(s) CONTRATANTE, e SAMI Arquitetura e Interiores, denominado simplesmente CONTRATADO, concordam que o projeto foi concluído com a execução e entrega de todas as fases e tarefas definidas no contrato.
+
+O CONTRATANTE informa que, dando-se a finalização do projeto, recebeu todo o material, sendo ele:
+${itensEntrega.map(i=>`- ${i}`).join('\n')}
+
+${linkDrive ? `O contratante registra que todo o material acima lhe foi enviado e devidamente recebido pelo link do Google Drive disponibilizado: ${linkDrive}` : 'O contratante registra que todo o material acima lhe foi enviado e devidamente recebido.'}
+
+As partes declaram ainda estar cientes de que, tendo a entrega sido devidamente realizada, estão encerradas as atividades de projeto referentes a esse espaço, portanto não serão realizadas nenhum tipo de modificação dentro desse pacote de projeto. Caso sejam necessárias quaisquer alterações, será realizado novo contrato.
+
+O contratante declara também estar ciente de que, não sendo a CONTRATADA contratada para gerenciar ou acompanhar diretamente a obra, a CONTRATADA fará, conforme contrato, 1 visita técnica de até 1 hora durante o período de obra, e que além desse serviço quaisquer atividades solicitadas pelo contratante, sejam elas visitas ou possíveis alterações de projeto, serão objeto de um contrato à parte. A visita tem prazo máximo de 3 meses, a contar da data de hoje, para acontecer, e deverá ser agendada com no mínimo 48h de antecedência da data pretendida. As mesmas poderão ser realizadas no período que compreende das 9:00h às 11:30h e das 13:30h às 17:00h, de segunda a sexta-feira, exceto feriados.
+
+A visita para ambientação e fotografia dos ambientes será agendada após a conclusão da obra, em comum acordo entre as partes, considerando a disponibilidade dos clientes e da equipe SAMI Arquitetura e Interiores, sempre dentro do horário comercial.
+
+Ao aprovar este termo pelo link, as partes dão por encerradas as fases do projeto.
+
+RESPONSÁVEIS TÉCNICAS
+Arquiteta Sabrina Coelho Alves de Andrade — CAU: A289541-2
+Arquiteta Mirella Sacha Matilde — CAU: A277813-0`;
+
+  fecharModalEditar();
+  preencherFormularioAprovacaoComTexto('termo_finalizacao', 'Termo de Aceite e Finalização de Projeto', texto);
+}
+
+function preencherFormularioAprovacaoComTexto(tipo, titulo, descricao){
+  toggleForm('formNovaAprovacao', true);
+  document.getElementById('apTipo').value = tipo;
+  document.getElementById('apTitulo').value = titulo;
+  document.getElementById('apDescricao').value = descricao;
+  document.getElementById('formNovaAprovacao').scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+/* ================= BACKUP / EXPORTAÇÃO ================= */
+const TABELAS_BACKUP = [
+  'projetos','clientes','etapas','tarefas','ambientes','briefing_respostas',
+  'financeiro_parcelas','despesas','orcamentos','contratos','fornecedores',
+  'equipe','tarefas_tempo','aprovacoes_cliente','aprovacao_checklist_itens',
+  'atas_reuniao','registros_visita','relatorios_obra','compromissos',
+  'checklist_revisao','checklist_revisao_itens','conteudo_posts','anexos',
+];
+
+function paraCSV(linhas){
+  if(!linhas || linhas.length===0) return '';
+  const colunas = [...new Set(linhas.flatMap(l => Object.keys(l)))];
+  const escapar = v => {
+    if(v===null || v===undefined) return '';
+    const texto = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return `"${texto.replace(/"/g,'""')}"`;
+  };
+  return [colunas.join(','), ...linhas.map(l => colunas.map(c => escapar(l[c])).join(','))].join('\n');
+}
+
+async function exportarBackup(){
+  if(!confirm('Baixar um backup de todos os dados do sistema? Vai gerar um arquivo por área (formato CSV, abre no Excel).')) return;
+
+  const btn = document.querySelector('[onclick="exportarBackup()"]');
+  if(btn) btn.textContent = 'Gerando...';
+
+  const partes = [];
+  for(const tabela of TABELAS_BACKUP){
+    try {
+      const { data, error } = await sb.from(tabela).select('*');
+      if(error) { console.warn('Pulei', tabela, error.message); continue; }
+      if(data && data.length > 0){
+        partes.push(`\n\n========== ${tabela.toUpperCase()} (${data.length} registros) ==========\n${paraCSV(data)}`);
+      }
+    } catch(e){ console.warn('Erro em', tabela, e); }
+  }
+
+  if(partes.length===0){
+    alert('Não consegui ler nenhum dado pro backup.');
+    if(btn) btn.textContent = 'Baixar backup';
+    return;
+  }
+
+  const cabecalho = `BACKUP SAMI GESTAO — gerado em ${new Date().toLocaleString('pt-BR')}\n` +
+    `Cada bloco abaixo é uma area do sistema, em formato CSV (abre no Excel).`;
+  const conteudo = cabecalho + partes.join('');
+
+  const blob = new Blob([conteudo], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `backup-sami-${new Date().toISOString().slice(0,10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+
+  if(btn) btn.textContent = 'Baixar backup';
+}
+
+/* ================= ROTEIROS DE VÍDEO (Conteúdo) ================= */
+function trocarAbaConteudo(tab){
+  document.querySelectorAll('.ct-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'cttab-'+tab));
+  document.querySelectorAll('.ct-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
+  if(tab==='planner') loadConteudo();
+  if(tab==='roteiros') loadRoteiros();
+  if(tab==='referencias') loadIdeias();
+}
+
+const FORMATO_ROTEIRO_LABEL = { reels:'Reels', carrossel:'Carrossel', stories:'Stories', youtube:'YouTube', outro:'Outro' };
+const STATUS_ROTEIRO_LABEL = { ideia:'Ideia', roteiro:'Roteiro pronto', gravar:'Gravar', editar:'Editar', pronto:'Pronto' };
+const STATUS_ROTEIRO_COR = { ideia:'var(--graphite)', roteiro:'var(--clay)', gravar:'var(--terracotta)', editar:'#7A5C8E', pronto:'var(--sage)' };
+let filtroRoteiroAtual = 'todos';
+
+async function loadRoteiros(){
+  const [{ data: roteiros }, { data: redes }] = await Promise.all([
+    sb.from('conteudo_roteiros').select('*, redes_sociais_config(nome,cor), projetos(nome)').order('criado_em',{ascending:false}),
+    sb.from('redes_sociais_config').select('id,nome').order('nome'),
+  ]);
+  window._roteiros = roteiros || [];
+
+  document.getElementById('rtRede').innerHTML = '<option value="">Sem rede definida</option>' +
+    (redes||[]).map(r => `<option value="${r.id}">${esc(r.nome)}</option>`).join('');
+  document.getElementById('rtProjeto').dataset.opcional = 'true';
+  await preencherSelectProjetos('rtProjeto');
+
+  renderRoteiros();
+}
+
+function filtrarRoteiros(status){
+  filtroRoteiroAtual = status;
+  document.querySelectorAll('#filtroStatusRoteiro .chip').forEach(c => c.classList.toggle('on', c.dataset.fr===status));
+  renderRoteiros();
+}
+
+function renderRoteiros(){
+  const lista = (window._roteiros||[]).filter(r => filtroRoteiroAtual==='todos' || r.status===filtroRoteiroAtual);
+  const cont = document.getElementById('listaRoteiros');
+
+  if(lista.length===0){
+    cont.innerHTML = '<p class="muted">Nenhuma ideia de vídeo por aqui ainda. Anota as que vierem — depois é só transformar em roteiro.</p>';
+    return;
+  }
+
+  cont.innerHTML = `<div class="checklist-grid">` + lista.map(r => `
+    <details class="checklist-ambiente">
+      <summary class="checklist-ambiente-titulo">
+        <span>${esc(r.titulo)}</span>
+        <span class="checklist-ambiente-count" style="color:${STATUS_ROTEIRO_COR[r.status]};border-color:${STATUS_ROTEIRO_COR[r.status]};">${STATUS_ROTEIRO_LABEL[r.status]}</span>
+      </summary>
+      <div class="checklist-ambiente-corpo">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+          <span class="badge line">${FORMATO_ROTEIRO_LABEL[r.formato]||r.formato}</span>
+          ${r.redes_sociais_config?.nome ? `<span class="badge line" style="color:${r.redes_sociais_config.cor};">${esc(r.redes_sociais_config.nome)}</span>` : ''}
+          ${r.projetos?.nome ? `<span class="badge clay">${esc(r.projetos.nome)}</span>` : ''}
+          ${r.data_prevista ? `<span class="badge line">${fmtDataBR(r.data_prevista)}</span>` : ''}
+        </div>
+
+        ${r.gancho ? `<p class="rev-subgrupo-titulo" style="margin-top:0;">Gancho</p><p style="font-size:13px;margin:0 0 10px;white-space:pre-wrap;">${esc(r.gancho)}</p>` : ''}
+        ${r.roteiro ? `<p class="rev-subgrupo-titulo">Roteiro</p><p style="font-size:13px;margin:0 0 10px;white-space:pre-wrap;">${esc(r.roteiro)}</p>` : ''}
+        ${r.legenda ? `<p class="rev-subgrupo-titulo">Legenda</p><p style="font-size:13px;margin:0 0 6px;white-space:pre-wrap;">${esc(r.legenda)}</p>
+          <button class="btn-ghost" style="font-size:11.5px;padding:0;margin-bottom:10px;" onclick="copiarTexto(${JSON.stringify(r.legenda + (r.hashtags?'\n\n'+r.hashtags:'')).replace(/"/g,'&quot;')})">copiar legenda + hashtags</button>` : ''}
+        ${r.hashtags ? `<p style="font-size:12.5px;color:var(--terracotta);margin:0 0 10px;">${esc(r.hashtags)}</p>` : ''}
+        ${r.trilha ? `<p style="font-size:12.5px;color:var(--graphite);margin:0 0 6px;">Trilha: ${esc(r.trilha)}</p>` : ''}
+        ${r.referencia_url ? `<p style="margin:0 0 10px;"><a href="${esc(r.referencia_url)}" target="_blank" rel="noopener" style="font-size:12.5px;color:var(--terracotta);">ver referência</a></p>` : ''}
+
+        <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:10px;margin-top:6px;">
+          <select onchange="atualizarStatusRoteiro('${r.id}', this.value)" style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:5px 8px;">
+            ${Object.entries(STATUS_ROTEIRO_LABEL).map(([v,l]) => `<option value="${v}" ${v===r.status?'selected':''}>${l}</option>`).join('')}
+          </select>
+          <div style="display:flex;gap:10px;">
+            <button class="edit-link" onclick="abrirEdicaoRoteiro('${r.id}')">editar</button>
+            <button class="remove-link" onclick="excluirRoteiro('${r.id}')">remover</button>
+          </div>
+        </div>
+      </div>
+    </details>`).join('') + `</div>`;
+}
+
+function copiarTexto(texto){
+  navigator.clipboard.writeText(texto).then(() => alert('Copiado!'));
+}
+
+function lerCamposRoteiro(){
+  return {
+    titulo: document.getElementById('rtTitulo').value.trim(),
+    formato: document.getElementById('rtFormato').value,
+    rede_id: document.getElementById('rtRede').value || null,
+    projeto_id: document.getElementById('rtProjeto').value || null,
+    data_prevista: document.getElementById('rtDataPrevista').value || null,
+    gancho: document.getElementById('rtGancho').value.trim() || null,
+    roteiro: document.getElementById('rtRoteiro').value.trim() || null,
+    legenda: document.getElementById('rtLegenda').value.trim() || null,
+    hashtags: document.getElementById('rtHashtags').value.trim() || null,
+    trilha: document.getElementById('rtTrilha').value.trim() || null,
+    referencia_url: document.getElementById('rtReferencia').value.trim() || null,
+  };
+}
+
+async function criarRoteiro(e){
+  e.preventDefault();
+  const dados = lerCamposRoteiro();
+  if(!dados.titulo) return;
+
+  if(window._roteiroEditandoId){
+    const resultado = await sb.from('conteudo_roteiros').update(dados).eq('id', window._roteiroEditandoId);
+    if(checarErro(resultado, 'salvar roteiro')) return;
+    window._roteiroEditandoId = null;
+  } else {
+    const resultado = await sb.from('conteudo_roteiros').insert(dados);
+    if(checarErro(resultado, 'salvar roteiro')) return;
+  }
+  e.target.reset();
+  toggleForm('formNovoRoteiro', false);
+  loadRoteiros();
+}
+
+function abrirEdicaoRoteiro(id){
+  const r = (window._roteiros||[]).find(x => x.id===id);
+  if(!r) return;
+  window._roteiroEditandoId = id;
+  document.getElementById('rtTitulo').value = r.titulo || '';
+  document.getElementById('rtFormato').value = r.formato || 'reels';
+  document.getElementById('rtRede').value = r.rede_id || '';
+  document.getElementById('rtProjeto').value = r.projeto_id || '';
+  document.getElementById('rtDataPrevista').value = r.data_prevista || '';
+  document.getElementById('rtGancho').value = r.gancho || '';
+  document.getElementById('rtRoteiro').value = r.roteiro || '';
+  document.getElementById('rtLegenda').value = r.legenda || '';
+  document.getElementById('rtHashtags').value = r.hashtags || '';
+  document.getElementById('rtTrilha').value = r.trilha || '';
+  document.getElementById('rtReferencia').value = r.referencia_url || '';
+  toggleForm('formNovoRoteiro', true);
+  document.getElementById('formNovoRoteiro').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+async function atualizarStatusRoteiro(id, status){
+  const r = await sb.from('conteudo_roteiros').update({ status }).eq('id', id);
+  if(checarErro(r, 'atualizar status do roteiro')) return;
+  loadRoteiros();
+}
+
+async function excluirRoteiro(id){
+  await excluirComConfirmacao('conteudo_roteiros', id, 'essa ideia de vídeo', () => loadRoteiros());
+}
