@@ -448,3 +448,10 @@
 
   /* Sub-abas com contorno próprio, separando melhor as seções */
   .pj-tabcontent, .fin-tabcontent, .ct-tabcontent{padding-top:4px;}
+
+  /* Concluídos do checklist ficam recolhidos, pra não empilhar na tela */
+  .checklist-feitos{margin-top:6px;border-top:1px dashed var(--line);padding-top:6px;}
+  .checklist-feitos > summary{font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--sage);cursor:pointer;padding:3px 0;list-style:none;}
+  .checklist-feitos > summary::-webkit-details-marker{display:none;}
+  .checklist-feitos > summary::before{content:'▸ ';}
+  .checklist-feitos[open] > summary::before{content:'▾ ';}

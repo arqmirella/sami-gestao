@@ -699,6 +699,7 @@ function trocarAbaProjeto(tab){
   if(tab==='anexos') loadAnexos();
   if(tab==='orcamentos') loadOrcamentosProjeto();
   if(tab==='contrato') loadContrato();
+  if(tab==='produtividade') loadProdutividadeProjeto();
   if(tab==='atas') loadAtas();
   if(tab==='briefing') loadBriefing();
   if(tab==='checklist') loadChecklistRevisao();
@@ -782,20 +783,27 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
         })
         .map(amb => {
         const itens = tarefasDaEtapa.filter(t => (t.ambiente_id||null) === amb.id);
-        const concluidos = itens.filter(i=>i.status==='concluida').length;
-        return `<details class="checklist-ambiente">
-          <summary class="checklist-ambiente-titulo">
-            <span>${esc(amb.nome)}</span>
-            <span class="checklist-ambiente-count ${concluidos===itens.length && itens.length>0 ? 'completo' : ''}">${concluidos}/${itens.length}</span>
-          </summary>
-          <div class="checklist-ambiente-corpo">
-            ${itens.map(i => `
+        const feitos = itens.filter(i=>i.status==='concluida');
+        const pendentes = itens.filter(i=>i.status!=='concluida');
+        const linhaItem = i => `
               <div class="checklist-item">
                 <input type="checkbox" ${i.status==='concluida'?'checked':''} onchange="toggleChecklistItem('${i.id}', this.checked)" />
                 <span class="${i.status==='concluida'?'done':''}">${esc(i.titulo)}</span>
                 <button class="edit-link" onclick="abrirModalEditarTarefa('${i.id}')">editar</button>
                 <button class="remove-link" onclick="excluirTarefaProjeto('${i.id}')">×</button>
-              </div>`).join('')}
+              </div>`;
+        return `<details class="checklist-ambiente">
+          <summary class="checklist-ambiente-titulo">
+            <span>${esc(amb.nome)}</span>
+            <span class="checklist-ambiente-count ${feitos.length===itens.length && itens.length>0 ? 'completo' : ''}">${feitos.length}/${itens.length}</span>
+          </summary>
+          <div class="checklist-ambiente-corpo">
+            ${pendentes.map(linhaItem).join('')}
+            ${feitos.length > 0 ? `
+              <details class="checklist-feitos">
+                <summary>${feitos.length} concluído${feitos.length>1?'s':''}</summary>
+                ${feitos.map(linhaItem).join('')}
+              </details>` : ''}
             <form class="checklist-add" onsubmit="adicionarItemChecklist(event,'${et.id}',${amb.id?`'${amb.id}'`:'null'})">
               <input placeholder="+ item" />
               <button class="btn-ghost" style="border:1px solid var(--line);border-radius:8px;">Add</button>
@@ -5507,4 +5515,135 @@ async function alternarAtaVisivelCliente(id, visivelAtual){
   const r = await sb.from('atas_reuniao').update({ visivel_cliente: !visivelAtual }).eq('id', id);
   if(checarErro(r, 'atualizar visibilidade da ata')) return;
   loadAtas();
+}
+
+/* ================= PRODUTIVIDADE DO PROJETO ================= */
+async function loadProdutividadeProjeto(){
+  await ensureChartJs();
+  const cont = document.getElementById('produtividadeConteudo');
+  cont.innerHTML = '<p class="muted">Carregando...</p>';
+
+  const [{ data: tarefas }, { data: registros }, { data: etapas }, { data: ambientes }] = await Promise.all([
+    sb.from('tarefas').select('id,titulo,status,etapa_id,ambiente_id').eq('projeto_id', projetoAtualId),
+    sb.from('tarefas_tempo').select('tarefa_id,equipe_id,duracao_segundos,equipe(nome)').not('duracao_segundos','is',null),
+    sb.from('etapas').select('id,nome').eq('projeto_id', projetoAtualId),
+    sb.from('ambientes').select('id,nome').eq('projeto_id', projetoAtualId),
+  ]);
+
+  const idsDoProjeto = new Set((tarefas||[]).map(t => t.id));
+  const registrosDoProjeto = (registros||[]).filter(r => idsDoProjeto.has(r.tarefa_id));
+
+  if(registrosDoProjeto.length === 0){
+    cont.innerHTML = `<div class="card" style="max-width:560px;">
+      <p class="label">Produtividade</p>
+      <p class="muted" style="margin-top:0;">Nenhum tempo cronometrado nesse projeto ainda. Use o botão "▶ Iniciar" nas tarefas (aba Tarefas) pra começar a medir.</p>
+    </div>`;
+    return;
+  }
+
+  const mapaEtapa = new Map((etapas||[]).map(e => [e.id, e.nome]));
+  const mapaAmbiente = new Map((ambientes||[]).map(a => [a.id, a.nome]));
+  const mapaTarefa = new Map((tarefas||[]).map(t => [t.id, t]));
+
+  // Totais
+  const totalSeg = registrosDoProjeto.reduce((s,r) => s + (r.duracao_segundos||0), 0);
+
+  const porTarefa = new Map();
+  const porPessoa = new Map();
+  const porEtapa = new Map();
+  const porAmbiente = new Map();
+
+  registrosDoProjeto.forEach(r => {
+    const seg = r.duracao_segundos || 0;
+    const t = mapaTarefa.get(r.tarefa_id);
+    porTarefa.set(r.tarefa_id, (porTarefa.get(r.tarefa_id)||0) + seg);
+    const nomePessoa = r.equipe?.nome || 'Sem responsável';
+    porPessoa.set(nomePessoa, (porPessoa.get(nomePessoa)||0) + seg);
+    if(t){
+      const nomeEtapa = t.etapa_id ? (mapaEtapa.get(t.etapa_id) || 'Etapa removida') : 'Sem etapa';
+      porEtapa.set(nomeEtapa, (porEtapa.get(nomeEtapa)||0) + seg);
+      const nomeAmb = t.ambiente_id ? (mapaAmbiente.get(t.ambiente_id) || 'Ambiente removido') : 'Sem ambiente';
+      porAmbiente.set(nomeAmb, (porAmbiente.get(nomeAmb)||0) + seg);
+    }
+  });
+
+  const tarefasOrdenadas = [...porTarefa.entries()]
+    .map(([id, seg]) => ({ titulo: mapaTarefa.get(id)?.titulo || '(tarefa removida)', seg, status: mapaTarefa.get(id)?.status }))
+    .sort((a,b) => b.seg - a.seg);
+
+  const mediaSeg = Math.round(totalSeg / porTarefa.size);
+  const tarefasComTempo = porTarefa.size;
+  const totalTarefas = (tarefas||[]).length;
+
+  cont.innerHTML = `
+    <div class="grid cards4" style="margin-bottom:24px;">
+      <div class="card"><p class="label">Tempo total</p><p style="font-size:24px;font-weight:700;font-family:'Space Grotesk',sans-serif;color:var(--terracotta);">${fmtHoras(totalSeg)}</p></div>
+      <div class="card"><p class="label">Tarefas cronometradas</p><p style="font-size:24px;font-weight:700;font-family:'Space Grotesk',sans-serif;">${tarefasComTempo}<span style="font-size:14px;font-weight:400;color:var(--graphite);"> de ${totalTarefas}</span></p></div>
+      <div class="card"><p class="label">Média por tarefa</p><p style="font-size:24px;font-weight:700;font-family:'Space Grotesk',sans-serif;">${fmtHoras(mediaSeg)}</p></div>
+      <div class="card"><p class="label">Mais demorada</p><p style="font-size:15px;font-weight:600;margin-top:6px;">${esc(tarefasOrdenadas[0].titulo)}</p><p class="mono" style="font-size:12px;color:var(--terracotta);margin:2px 0 0;">${fmtHoras(tarefasOrdenadas[0].seg)}</p></div>
+    </div>
+
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+      <div class="chartbox">
+        <p class="label">Horas por etapa</p>
+        <canvas id="chartProdEtapa" height="200"></canvas>
+      </div>
+      <div class="chartbox">
+        <p class="label">Horas por pessoa</p>
+        <canvas id="chartProdPessoa" height="200"></canvas>
+      </div>
+    </div>
+
+    ${porAmbiente.size > 1 ? `
+    <div class="chartbox" style="margin-bottom:24px;">
+      <p class="label">Horas por ambiente</p>
+      <canvas id="chartProdAmbiente" height="150"></canvas>
+    </div>` : ''}
+
+    <p class="label" style="margin-bottom:10px;">Tempo por tarefa</p>
+    <div class="card" style="padding:0;">
+      <table>
+        <thead><tr><th>Tarefa</th><th>Status</th><th style="text-align:right;">Tempo</th><th style="width:130px;">Participação</th></tr></thead>
+        <tbody>
+          ${tarefasOrdenadas.map(t => {
+            const pct = Math.round((t.seg/totalSeg)*100);
+            return `<tr>
+              <td>${esc(t.titulo)}</td>
+              <td><span class="pill" style="color:${STATUS_PILL_COR[t.status]||'var(--graphite)'};border-color:${STATUS_PILL_COR[t.status]||'var(--line)'};">${STATUS_TAREFA_LABEL[t.status]||'—'}</span></td>
+              <td style="text-align:right;font-family:'IBM Plex Mono',monospace;">${fmtHoras(t.seg)}</td>
+              <td>
+                <div class="bar" style="height:6px;"><div style="width:${pct}%"></div></div>
+                <span style="font-size:11px;color:var(--graphite);">${pct}%</span>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+
+  const CORES_GRAF = ['#C1602E','#5C6E5A','#9C6B4F','#3E4A3E','#8B3A2B','#7A5C8E','#4A7A8C','#B08968'];
+  const emHoras = m => [...m.values()].map(s => Math.round((s/3600)*10)/10);
+
+  if(charts.prodEtapa) charts.prodEtapa.destroy();
+  charts.prodEtapa = new Chart(document.getElementById('chartProdEtapa'), {
+    type:'bar',
+    data:{ labels:[...porEtapa.keys()], datasets:[{ data: emHoras(porEtapa), backgroundColor:'#C1602E' }]},
+    options:{indexAxis:'y', plugins:{legend:{display:false}}, scales:{x:{grid:{color:'#EFEAE1'}},y:{grid:{display:false}}}}
+  });
+
+  if(charts.prodPessoa) charts.prodPessoa.destroy();
+  charts.prodPessoa = new Chart(document.getElementById('chartProdPessoa'), {
+    type:'doughnut',
+    data:{ labels:[...porPessoa.keys()], datasets:[{ data: emHoras(porPessoa), backgroundColor: CORES_GRAF }]},
+    options:{plugins:{legend:{position:'bottom', labels:{font:{size:11}}}}}
+  });
+
+  if(porAmbiente.size > 1){
+    if(charts.prodAmbiente) charts.prodAmbiente.destroy();
+    charts.prodAmbiente = new Chart(document.getElementById('chartProdAmbiente'), {
+      type:'bar',
+      data:{ labels:[...porAmbiente.keys()], datasets:[{ data: emHoras(porAmbiente), backgroundColor:'#9C6B4F' }]},
+      options:{plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}},y:{grid:{color:'#EFEAE1'}}}}
+    });
+  }
 }

@@ -374,6 +374,7 @@
       <div class="pd-nav-wrap">
         <nav class="pd-sidenav">
           <button type="button" class="pd-tab on" data-tab="geral" onclick="trocarAbaProjeto('geral')">Visão geral</button>
+          <button type="button" class="pd-tab" data-tab="produtividade" onclick="trocarAbaProjeto('produtividade')">Produtividade</button>
 
           <p class="pd-nav-group">Planejamento</p>
           <button type="button" class="pd-tab" data-tab="briefing" onclick="trocarAbaProjeto('briefing')">Briefing</button>
@@ -405,6 +406,11 @@
 
       <!-- Sub-aba: Visão geral (Tarefas + Financeiro) -->
       <!-- Sub-aba: Briefing -->
+      <!-- Sub-aba: Produtividade -->
+      <div id="pdtab-produtividade" class="pd-tabcontent hidden">
+        <div id="produtividadeConteudo"></div>
+      </div>
+
       <div id="pdtab-briefing" class="pd-tabcontent hidden">
         <div id="briefingConteudo"></div>
       </div>
