@@ -149,6 +149,7 @@ function showApp(){
   navigate('inicio');
   // Cria as tarefas das rotinas que estão na hora (silencioso, não trava a tela)
   gerarTarefasRecorrentes().catch(e => console.warn('rotinas:', e));
+  gerarDespesasFixas().catch(e => console.warn('despesas fixas:', e));
 }
 function showLogin(){
   document.getElementById('appScreen').style.display = 'none';
@@ -165,7 +166,7 @@ function navigate(view, opts){
   if(view==='projetos') trocarAbaProjetosModulo(opts.subaba || 'dashboard');
   if(view==='clientes') loadClientes();
   if(view==='conteudo') trocarAbaConteudo('planner');
-  if(view==='financeiro') trocarAbaFinanceiro('fluxo');
+  if(view==='financeiro') trocarAbaFinanceiro('visao');
   if(view==='fornecedores') loadFornecedores();
   if(view==='equipe') loadEquipe();
   if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId, opts.aba);
@@ -1765,12 +1766,48 @@ function statusEfetivo(p){
   return new Date(p.vencimento+'T00:00:00') < hoje ? 'atrasado' : 'pendente';
 }
 
+let periodoFinanceiroAtual = 'mes';
+let abaFinanceiraAtual = 'visao';
+
 function trocarAbaFinanceiro(tab){
+  abaFinanceiraAtual = tab;
   document.querySelectorAll('.fin-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'fintab-'+tab));
   document.querySelectorAll('.fin-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
-  if(tab==='fluxo') loadFluxoCaixa();
+  if(tab==='visao') loadFluxoCaixa();
   if(tab==='receber') loadContasReceber();
   if(tab==='despesas') loadDespesas();
+  if(tab==='comissoes') loadComissoesRT();
+  if(tab==='projetos') loadFinanceiroPorProjeto();
+}
+
+function mudarPeriodoFinanceiro(periodo){
+  periodoFinanceiroAtual = periodo;
+  trocarAbaFinanceiro(abaFinanceiraAtual);
+}
+
+/* Devolve o intervalo de datas do período escolhido (null = sem limite) */
+function intervaloPeriodoFinanceiro(){
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const ano = hoje.getFullYear(), mes = hoje.getMonth();
+  if(periodoFinanceiroAtual === 'mes')
+    return { de: dataLocalISO(new Date(ano, mes, 1)), ate: dataLocalISO(new Date(ano, mes+1, 0)) };
+  if(periodoFinanceiroAtual === 'mes_passado')
+    return { de: dataLocalISO(new Date(ano, mes-1, 1)), ate: dataLocalISO(new Date(ano, mes, 0)) };
+  if(periodoFinanceiroAtual === 'trimestre')
+    return { de: dataLocalISO(new Date(ano, mes-2, 1)), ate: dataLocalISO(new Date(ano, mes+1, 0)) };
+  if(periodoFinanceiroAtual === 'ano')
+    return { de: `${ano}-01-01`, ate: `${ano}-12-31` };
+  return { de: null, ate: null };
+}
+
+/* Filtra uma lista pelo campo de data, respeitando o período escolhido */
+function filtrarPorPeriodo(lista, campoData){
+  const { de, ate } = intervaloPeriodoFinanceiro();
+  if(!de) return lista;
+  return (lista||[]).filter(item => {
+    const d = item[campoData];
+    return d && d >= de && d <= ate;
+  });
 }
 
 function statusEfetivoGenerico(item){
@@ -1781,6 +1818,7 @@ function statusEfetivoGenerico(item){
 
 async function loadFluxoCaixa(){
   await ensureChartJs();
+  renderPainelHoje();
   const [{ data: parcelas }, { data: despesas }, { data: configData }] = await Promise.all([
     sb.from('financeiro_parcelas').select('valor,vencimento,status'),
     sb.from('despesas').select('valor,vencimento,status'),
@@ -1871,7 +1909,7 @@ async function loadContasReceber(){
     .from('financeiro_parcelas')
     .select('id,descricao,valor,vencimento,status,forma_pagamento,data_pagamento,projeto_id,projetos(nome,clientes(nome_completo))')
     .order('vencimento', { ascending: true });
-  window._parcelas = parcelas || [];
+  window._parcelas = filtrarPorPeriodo(parcelas || [], 'vencimento');
 
   let recebido=0, pendente=0, atrasado=0;
   window._parcelas.forEach(p => {
@@ -2803,7 +2841,7 @@ async function loadDespesas(){
     .from('despesas')
     .select('id,descricao,categoria,valor,vencimento,status,projeto_id,projetos(nome)')
     .order('vencimento', { ascending: true });
-  window._despesas = despesas || [];
+  window._despesas = filtrarPorPeriodo(despesas || [], 'vencimento');
 
   let pago=0, pendente=0, atrasado=0;
   window._despesas.forEach(d => {
@@ -5646,4 +5684,300 @@ async function loadProdutividadeProjeto(){
       options:{plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}},y:{grid:{color:'#EFEAE1'}}}}
     });
   }
+}
+
+/* ================= PAINEL "HOJE" DO FINANCEIRO ================= */
+async function renderPainelHoje(){
+  const cont = document.getElementById('painelHojeFinanceiro');
+  if(!cont) return;
+
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const hojeStr = dataLocalISO(hoje);
+  const fimSemana = new Date(hoje); fimSemana.setDate(fimSemana.getDate() + 7);
+  const fimSemanaStr = dataLocalISO(fimSemana);
+
+  const [{ data: aReceber }, { data: aPagar }, { data: comissoesPend }] = await Promise.all([
+    sb.from('financeiro_parcelas').select('id,descricao,valor,vencimento,projeto_id,projetos(nome,clientes(nome_completo))').neq('status','pago').lte('vencimento', fimSemanaStr).order('vencimento'),
+    sb.from('despesas').select('id,descricao,valor,vencimento').neq('status','pago').lte('vencimento', fimSemanaStr).order('vencimento'),
+    sb.from('comissoes_rt').select('id,descricao,valor,data_prevista').eq('status','pendente').lte('data_prevista', fimSemanaStr).order('data_prevista'),
+  ]);
+
+  const atrasadas = (aReceber||[]).filter(p => p.vencimento < hojeStr);
+  const daSemana = (aReceber||[]).filter(p => p.vencimento >= hojeStr);
+  const contasAtrasadas = (aPagar||[]).filter(d => d.vencimento < hojeStr);
+  const contasSemana = (aPagar||[]).filter(d => d.vencimento >= hojeStr);
+
+  const totalAtrasado = atrasadas.reduce((s,p) => s + Number(p.valor), 0);
+  const totalSemana = daSemana.reduce((s,p) => s + Number(p.valor), 0);
+
+  const diasAtraso = venc => Math.round((hoje - new Date(venc+'T00:00:00'))/(1000*60*60*24));
+
+  if(atrasadas.length===0 && daSemana.length===0 && contasAtrasadas.length===0 && contasSemana.length===0 && (comissoesPend||[]).length===0){
+    cont.innerHTML = `<div class="card" style="border-left:3px solid var(--sage);">
+      <p style="margin:0;font-size:14px;">Nada vencendo nos próximos 7 dias e nenhuma conta atrasada.</p>
+    </div>`;
+    return;
+  }
+
+  cont.innerHTML = `
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;">
+      ${atrasadas.length > 0 ? `
+        <div class="card" style="border-left:3px solid var(--alert);">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+            <p class="label" style="margin:0;color:var(--alert);">Cobrar — atrasado</p>
+            <span class="mono" style="font-size:14px;font-weight:600;color:var(--alert);">${fmtMoeda(totalAtrasado)}</span>
+          </div>
+          ${atrasadas.slice(0,5).map(p => `
+            <div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--paper);">
+              <span>${esc(p.projetos?.clientes?.nome_completo || p.projetos?.nome || p.descricao || 'Parcela')}
+                <span style="color:var(--alert);font-size:11.5px;"> · ${diasAtraso(p.vencimento)}d</span></span>
+              <b>${fmtMoeda(p.valor)}</b>
+            </div>`).join('')}
+          ${atrasadas.length>5?`<p class="muted" style="font-size:11.5px;margin:6px 0 0;">+${atrasadas.length-5} outras</p>`:''}
+        </div>` : ''}
+
+      ${daSemana.length > 0 ? `
+        <div class="card" style="border-left:3px solid var(--terracotta);">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+            <p class="label" style="margin:0;color:var(--terracotta);">A receber — 7 dias</p>
+            <span class="mono" style="font-size:14px;font-weight:600;color:var(--terracotta);">${fmtMoeda(totalSemana)}</span>
+          </div>
+          ${daSemana.slice(0,5).map(p => `
+            <div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--paper);">
+              <span>${esc(p.projetos?.clientes?.nome_completo || p.projetos?.nome || p.descricao || 'Parcela')}
+                <span style="color:var(--graphite);font-size:11.5px;"> · ${fmtDataBR(p.vencimento)}</span></span>
+              <b>${fmtMoeda(p.valor)}</b>
+            </div>`).join('')}
+        </div>` : ''}
+
+      ${(contasAtrasadas.length + contasSemana.length) > 0 ? `
+        <div class="card" style="border-left:3px solid var(--clay);">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+            <p class="label" style="margin:0;color:var(--clay);">Contas a pagar</p>
+            <span class="mono" style="font-size:14px;font-weight:600;color:var(--clay);">${fmtMoeda([...contasAtrasadas,...contasSemana].reduce((s,d)=>s+Number(d.valor),0))}</span>
+          </div>
+          ${[...contasAtrasadas,...contasSemana].slice(0,5).map(d => `
+            <div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--paper);">
+              <span>${esc(d.descricao)}
+                <span style="color:${d.vencimento<hojeStr?'var(--alert)':'var(--graphite)'};font-size:11.5px;"> · ${d.vencimento<hojeStr?`${diasAtraso(d.vencimento)}d atrasada`:fmtDataBR(d.vencimento)}</span></span>
+              <b>${fmtMoeda(d.valor)}</b>
+            </div>`).join('')}
+        </div>` : ''}
+
+      ${(comissoesPend||[]).length > 0 ? `
+        <div class="card" style="border-left:3px solid var(--sage);">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+            <p class="label" style="margin:0;color:var(--sage);">Comissões a receber</p>
+            <span class="mono" style="font-size:14px;font-weight:600;color:var(--sage);">${fmtMoeda(comissoesPend.reduce((s,c)=>s+Number(c.valor),0))}</span>
+          </div>
+          ${comissoesPend.slice(0,5).map(c => `
+            <div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--paper);">
+              <span>${esc(c.descricao||'Comissão')}</span>
+              <b>${fmtMoeda(c.valor)}</b>
+            </div>`).join('')}
+        </div>` : ''}
+    </div>`;
+}
+
+/* ================= COMISSÕES RT ================= */
+function calcularComissaoRT(){
+  const compra = parseValorBR(document.getElementById('crValorCompra').value);
+  const pct = parseValorBR(document.getElementById('crPercentual').value);
+  if(!isNaN(compra) && !isNaN(pct) && compra > 0 && pct > 0){
+    const valor = (compra * pct) / 100;
+    document.getElementById('crValor').value = valor.toFixed(2).replace('.', ',');
+  }
+}
+
+async function loadComissoesRT(){
+  document.getElementById('crProjeto').dataset.opcional = 'true';
+  await preencherSelectProjetos('crProjeto');
+
+  const [{ data: comissoes }, { data: fornecedores }] = await Promise.all([
+    sb.from('comissoes_rt').select('*, projetos(nome), fornecedores(nome)').order('data_prevista',{ascending:true,nullsFirst:false}),
+    sb.from('fornecedores').select('id,nome').order('nome'),
+  ]);
+
+  document.getElementById('crFornecedor').innerHTML = '<option value="">Sem fornecedor vinculado</option>' +
+    (fornecedores||[]).map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('');
+
+  // Recebidas filtram por data de recebimento; pendentes, por previsão
+  const recebidas = filtrarPorPeriodo((comissoes||[]).filter(c => c.status==='recebido'), 'data_recebimento');
+  const pendentes = (comissoes||[]).filter(c => c.status==='pendente');
+  const lista = [...pendentes, ...recebidas];
+
+  const totalRecebido = recebidas.reduce((s,c) => s + Number(c.valor), 0);
+  const totalPendente = pendentes.reduce((s,c) => s + Number(c.valor), 0);
+
+  document.getElementById('comissoesResumo').innerHTML = `
+    <div class="card"><p class="label">Recebido no período</p><p style="font-size:20px;font-weight:600;color:${CORES.pago};">${fmtMoeda(totalRecebido)}</p></div>
+    <div class="card"><p class="label">A receber</p><p style="font-size:20px;font-weight:600;color:${CORES.pendente};">${fmtMoeda(totalPendente)}</p></div>
+    <div class="card"><p class="label">Comissões lançadas</p><p style="font-size:20px;font-weight:600;">${(comissoes||[]).length}</p></div>`;
+
+  document.getElementById('tabelaComissoes').innerHTML = lista.length===0
+    ? '<tr><td colspan="5" class="muted">Nenhuma comissão lançada ainda.</td></tr>'
+    : lista.map(c => `
+      <tr>
+        <td><p style="margin:0;">${esc(c.descricao||'Comissão')}</p><p style="margin:2px 0 0;font-size:11.5px;color:var(--graphite);">${esc(c.fornecedores?.nome||'')}${c.percentual?` · ${c.percentual}%`:''}</p></td>
+        <td style="font-size:12.5px;">${esc(c.projetos?.nome||'—')}</td>
+        <td>${fmtMoeda(c.valor)}</td>
+        <td>${c.status==='recebido'
+          ? `<span class="pill" style="color:${CORES.pago};border-color:${CORES.pago};">Recebido</span>`
+          : `<button class="pill" style="color:${CORES.pendente};border-color:${CORES.pendente};" onclick="marcarComissaoRecebida('${c.id}')">Pendente · marcar recebida</button>`}
+        </td>
+        <td><button class="remove-link" onclick="excluirComissaoRT('${c.id}')">remover</button></td>
+      </tr>`).join('');
+}
+
+async function criarComissaoRT(e){
+  e.preventDefault();
+  const valor = parseValorBR(document.getElementById('crValor').value);
+  if(isNaN(valor)){ alert('Digita o valor da comissão.'); return; }
+  const dataReceb = document.getElementById('crDataRecebimento').value;
+  const valorCompra = document.getElementById('crValorCompra').value.trim();
+  const pct = document.getElementById('crPercentual').value.trim();
+
+  const resultado = await sb.from('comissoes_rt').insert({
+    projeto_id: document.getElementById('crProjeto').value || null,
+    fornecedor_id: document.getElementById('crFornecedor').value || null,
+    descricao: document.getElementById('crDescricao').value.trim() || null,
+    valor_compra: valorCompra ? parseValorBR(valorCompra) : null,
+    percentual: pct ? parseValorBR(pct) : null,
+    valor,
+    data_prevista: document.getElementById('crDataPrevista').value || null,
+    data_recebimento: dataReceb || null,
+    status: dataReceb ? 'recebido' : 'pendente',
+    observacao: document.getElementById('crObservacao').value.trim() || null,
+  });
+  if(checarErro(resultado, 'lançar comissão')) return;
+  e.target.reset();
+  toggleForm('formComissaoRT', false);
+  loadComissoesRT();
+}
+
+async function marcarComissaoRecebida(id){
+  const r = await sb.from('comissoes_rt').update({ status:'recebido', data_recebimento: dataLocalISO() }).eq('id', id);
+  if(checarErro(r, 'marcar comissão recebida')) return;
+  loadComissoesRT();
+}
+
+async function excluirComissaoRT(id){
+  await excluirComConfirmacao('comissoes_rt', id, 'essa comissão', () => loadComissoesRT());
+}
+
+/* ================= DESPESAS FIXAS (se repetem todo mês) ================= */
+async function abrirDespesasFixas(){
+  const { data: fixas } = await sb.from('despesas_fixas').select('*').order('dia_vencimento');
+
+  abrirModal(`
+    <p class="label" style="margin-bottom:6px;">Despesas fixas do mês</p>
+    <p class="muted" style="margin-top:0;margin-bottom:14px;">Cadastre uma vez (aluguel, internet, contador...) e o sistema lança sozinho todo mês, na data certa.</p>
+
+    <form onsubmit="criarDespesaFixa(event)" style="background:var(--paper);border-radius:10px;padding:12px;margin-bottom:16px;">
+      <input id="dfDescricao" required placeholder="Descrição (ex: Aluguel do escritório)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:8px;" />
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <input id="dfCategoria" placeholder="Categoria" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
+        <input id="dfValor" required placeholder="Valor" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
+        <input id="dfDia" type="number" min="1" max="28" value="10" title="Dia do vencimento" style="width:80px;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
+      </div>
+      <button class="btn" style="width:100%;">+ Adicionar despesa fixa</button>
+    </form>
+
+    <div style="max-height:280px;overflow-y:auto;">
+      ${(fixas||[]).length===0
+        ? '<p class="muted">Nenhuma despesa fixa cadastrada.</p>'
+        : fixas.map(f => `
+          <div class="quicklink-item">
+            <div>
+              <p style="margin:0;font-size:13.5px;${f.ativa?'':'opacity:.5;text-decoration:line-through;'}">${esc(f.descricao)}</p>
+              <p style="margin:2px 0 0;font-size:12px;color:var(--graphite);">${fmtMoeda(f.valor)} · todo dia ${f.dia_vencimento}${f.categoria?` · ${esc(f.categoria)}`:''}</p>
+            </div>
+            <span style="display:flex;gap:10px;">
+              <button class="edit-link" onclick="alternarDespesaFixa('${f.id}', ${f.ativa})">${f.ativa?'pausar':'ativar'}</button>
+              <button class="remove-link" onclick="excluirDespesaFixa('${f.id}')">remover</button>
+            </span>
+          </div>`).join('')}
+    </div>
+    <div class="form-actions" style="margin-top:16px;">
+      <button class="btn-ghost" onclick="fecharModalEditar()">Fechar</button>
+    </div>
+  `);
+}
+
+async function criarDespesaFixa(e){
+  e.preventDefault();
+  const valor = parseValorBR(document.getElementById('dfValor').value);
+  if(isNaN(valor)){ alert('Digita um valor válido.'); return; }
+  const r = await sb.from('despesas_fixas').insert({
+    descricao: document.getElementById('dfDescricao').value.trim(),
+    categoria: document.getElementById('dfCategoria').value.trim() || null,
+    valor,
+    dia_vencimento: Number(document.getElementById('dfDia').value) || 1,
+  });
+  if(checarErro(r, 'criar despesa fixa')) return;
+  abrirDespesasFixas();
+}
+
+async function alternarDespesaFixa(id, ativa){
+  const r = await sb.from('despesas_fixas').update({ ativa: !ativa }).eq('id', id);
+  if(checarErro(r, 'atualizar despesa fixa')) return;
+  abrirDespesasFixas();
+}
+
+async function excluirDespesaFixa(id){
+  if(!confirm('Remover essa despesa fixa? As despesas que ela já lançou continuam registradas.')) return;
+  await sb.from('despesas_fixas').delete().eq('id', id);
+  abrirDespesasFixas();
+}
+
+/* Lança as despesas fixas do mês corrente — roda ao abrir o sistema */
+async function gerarDespesasFixas(){
+  const { data: fixas } = await sb.from('despesas_fixas').select('*').eq('ativa', true);
+  if(!fixas || fixas.length===0) return;
+
+  const hoje = new Date();
+  const ano = hoje.getFullYear(), mes = hoje.getMonth();
+  const novas = [], idsGerados = [];
+
+  for(const f of fixas){
+    const vencimento = dataLocalISO(new Date(ano, mes, f.dia_vencimento));
+    // só lança se ainda não lançou a deste mês
+    if(f.ultima_geracao && f.ultima_geracao.slice(0,7) === vencimento.slice(0,7)) continue;
+    novas.push({ descricao: f.descricao, categoria: f.categoria, valor: f.valor, vencimento, despesa_fixa_id: f.id });
+    idsGerados.push({ id: f.id, data: vencimento });
+  }
+
+  if(novas.length > 0){
+    await sb.from('despesas').insert(novas);
+    for(const g of idsGerados){
+      await sb.from('despesas_fixas').update({ ultima_geracao: g.data }).eq('id', g.id);
+    }
+  }
+}
+
+/* ================= COMPARATIVO ENTRE PROJETOS ================= */
+async function loadFinanceiroPorProjeto(){
+  const { data: linhas } = await sb.from('v_financeiro_projetos').select('*');
+  const cont = document.getElementById('tabelaFinProjetos');
+
+  if(!linhas || linhas.length===0){
+    cont.innerHTML = '<tr><td colspan="6" class="muted">Nenhum projeto com movimentação ainda.</td></tr>';
+    return;
+  }
+
+  const comLucro = linhas.map(l => {
+    const custos = Number(l.despesas_pagas) + Number(l.custo_horas);
+    const lucro = Number(l.recebido) + Number(l.comissoes_recebidas) - custos;
+    return { ...l, custos, lucro };
+  }).sort((a,b) => b.lucro - a.lucro);
+
+  cont.innerHTML = comLucro.map(l => `
+    <tr style="cursor:pointer;" onclick="navigate('projeto-detalhe',{projetoId:'${l.projeto_id}'})">
+      <td><p style="margin:0;">${esc(l.projeto_nome)}</p><p style="margin:2px 0 0;font-size:11.5px;color:var(--graphite);">${esc(l.cliente_nome||'')}</p></td>
+      <td>${fmtMoeda(l.contratado)}</td>
+      <td style="color:${CORES.pago};">${fmtMoeda(l.recebido)}${Number(l.comissoes_recebidas)>0?`<br><span style="font-size:11px;color:var(--graphite);">+${fmtMoeda(l.comissoes_recebidas)} RT</span>`:''}</td>
+      <td style="color:${CORES.pendente};">${fmtMoeda(l.a_receber)}</td>
+      <td style="color:${CORES.atrasado};">${fmtMoeda(l.custos)}</td>
+      <td style="font-weight:600;color:${l.lucro>=0?CORES.pago:CORES.atrasado};">${fmtMoeda(l.lucro)}</td>
+    </tr>`).join('');
 }

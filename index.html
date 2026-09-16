@@ -1011,16 +1011,28 @@
     <!-- TAREFAS -->
     <!-- FINANCEIRO -->
     <section id="view-financeiro" class="hidden">
-      <h1>Financeiro</h1>
-
-      <div class="chip-select" style="margin-bottom:24px;">
-        <button type="button" class="chip fin-tab on" data-tab="fluxo" onclick="trocarAbaFinanceiro('fluxo')">Fluxo de caixa</button>
-        <button type="button" class="chip fin-tab" data-tab="receber" onclick="trocarAbaFinanceiro('receber')">A receber</button>
-        <button type="button" class="chip fin-tab" data-tab="despesas" onclick="trocarAbaFinanceiro('despesas')">Despesas</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
+        <h1 style="margin:0;">Financeiro</h1>
+        <select id="filtroPeriodoFin" onchange="mudarPeriodoFinanceiro(this.value)" style="border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:13px;background:#fff;">
+          <option value="mes">Este mês</option>
+          <option value="mes_passado">Mês passado</option>
+          <option value="trimestre">Últimos 3 meses</option>
+          <option value="ano">Este ano</option>
+          <option value="tudo">Tudo</option>
+        </select>
       </div>
 
-      <!-- Sub-aba: Fluxo de caixa -->
-      <div id="fintab-fluxo" class="fin-tabcontent">
+      <div class="chip-select" style="margin-bottom:24px;">
+        <button type="button" class="chip fin-tab on" data-tab="visao" onclick="trocarAbaFinanceiro('visao')">Visão geral</button>
+        <button type="button" class="chip fin-tab" data-tab="receber" onclick="trocarAbaFinanceiro('receber')">A receber</button>
+        <button type="button" class="chip fin-tab" data-tab="comissoes" onclick="trocarAbaFinanceiro('comissoes')">Comissões RT</button>
+        <button type="button" class="chip fin-tab" data-tab="despesas" onclick="trocarAbaFinanceiro('despesas')">Despesas</button>
+        <button type="button" class="chip fin-tab" data-tab="projetos" onclick="trocarAbaFinanceiro('projetos')">Por projeto</button>
+      </div>
+
+      <!-- Aba: Visão geral -->
+      <div id="fintab-visao" class="fin-tabcontent">
+        <div id="painelHojeFinanceiro" style="margin-bottom:24px;"></div>
         <div class="grid cards4" id="fluxoResumo" style="margin-bottom:24px;"></div>
 
         <div class="card" style="margin-bottom:24px;">
@@ -1044,7 +1056,7 @@
         </div>
       </div>
 
-      <!-- Sub-aba: A receber -->
+      <!-- Aba: A receber -->
       <div id="fintab-receber" class="fin-tabcontent hidden">
         <div class="grid cards4" id="financeiroResumo" style="margin-bottom:24px;"></div>
         <div class="grid" style="grid-template-columns:2fr 1fr;margin-bottom:24px;">
@@ -1073,10 +1085,53 @@
         </div>
       </div>
 
-      <!-- Sub-aba: Despesas -->
+      <!-- Aba: Comissões RT -->
+      <div id="fintab-comissoes" class="fin-tabcontent hidden">
+        <p class="muted" style="max-width:640px;">Comissões recebidas de fornecedores e lojas por indicação de compra. Entram como receita do escritório, separadas dos honorários do projeto.</p>
+        <div class="grid cards4" id="comissoesResumo" style="margin-bottom:24px;"></div>
+        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formComissaoRT')">+ Lançar comissão</button>
+        <form id="formComissaoRT" class="form-box hidden" style="max-width:620px;" onsubmit="criarComissaoRT(event)">
+          <div style="display:flex;gap:10px;">
+            <select id="crProjeto" data-opcional="true" style="flex:1;"><option value="">Sem projeto vinculado</option></select>
+            <select id="crFornecedor" style="flex:1;"><option value="">Sem fornecedor vinculado</option></select>
+          </div>
+          <input id="crDescricao" placeholder="Descrição (ex: Marcenaria — compra da cozinha)" />
+          <div style="display:flex;gap:10px;">
+            <input id="crValorCompra" placeholder="Valor da compra (opcional)" style="flex:1;" oninput="calcularComissaoRT()" />
+            <input id="crPercentual" placeholder="% comissão" style="flex:1;" oninput="calcularComissaoRT()" />
+            <input id="crValor" required placeholder="Valor da comissão" style="flex:1;" />
+          </div>
+          <div style="display:flex;gap:10px;">
+            <div style="flex:1;">
+              <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Previsão de recebimento</label>
+              <input id="crDataPrevista" type="date" style="width:100%;" />
+            </div>
+            <div style="flex:1;">
+              <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Já recebida em (opcional)</label>
+              <input id="crDataRecebimento" type="date" style="width:100%;" />
+            </div>
+          </div>
+          <input id="crObservacao" placeholder="Observação (opcional)" />
+          <div class="form-actions">
+            <button type="submit" class="btn">Salvar comissão</button>
+            <button type="button" class="btn-ghost" onclick="toggleForm('formComissaoRT', false)">Cancelar</button>
+          </div>
+        </form>
+        <div class="card" style="padding:0;">
+          <table>
+            <thead><tr><th>Descrição / Fornecedor</th><th>Projeto</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+            <tbody id="tabelaComissoes"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Aba: Despesas -->
       <div id="fintab-despesas" class="fin-tabcontent hidden">
         <div class="grid cards4" id="despesasResumo" style="margin-bottom:24px;"></div>
-        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaDespesa')">+ Lançar despesa</button>
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+          <button class="btn" onclick="toggleForm('formNovaDespesa')">+ Lançar despesa</button>
+          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="abrirDespesasFixas()">↻ Despesas fixas do mês</button>
+        </div>
         <form id="formNovaDespesa" class="form-box hidden" onsubmit="criarDespesa(event)">
           <input id="dpDescricao" required placeholder="Descrição (ex: Aluguel do escritório)" />
           <input id="dpCategoria" placeholder="Categoria (ex: Aluguel, Material, Freelancer)" />
@@ -1094,6 +1149,17 @@
           <table>
             <thead><tr><th>Descrição / Categoria</th><th>Vencimento</th><th>Valor</th><th>Status</th><th></th></tr></thead>
             <tbody id="tabelaDespesas"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Aba: Por projeto -->
+      <div id="fintab-projetos" class="fin-tabcontent hidden">
+        <p class="muted" style="max-width:640px;">Quanto cada projeto contratou, recebeu e custou. O lucro considera despesas pagas, comissões recebidas e o custo das horas trabalhadas (quando há custo/hora cadastrado em Equipe).</p>
+        <div class="card" style="padding:0;">
+          <table>
+            <thead><tr><th>Projeto</th><th>Contratado</th><th>Recebido</th><th>A receber</th><th>Custos</th><th>Lucro</th></tr></thead>
+            <tbody id="tabelaFinProjetos"></tbody>
           </table>
         </div>
       </div>
