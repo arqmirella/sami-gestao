@@ -56,6 +56,32 @@
   .dados-contrato-form input{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;}
   .checklist-item-opcoes{padding:10px 0;border-bottom:1px solid var(--paper);}
   .checklist-item-opcoes:last-child{border-bottom:none;}
+
+  /* Checklist agrupado em colunas */
+  .ck-grupo{margin-bottom:22px;}
+  .ck-grupo-topo{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1.5px solid var(--terracotta);padding-bottom:6px;margin-bottom:10px;}
+  .ck-grupo-nome{font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:600;}
+  .ck-grupo-contador{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--graphite);}
+  .ck-colunas{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 18px;}
+  .ck-item{padding:7px 0;border-bottom:1px solid var(--paper);}
+  .ck-nome{font-size:13px;display:block;margin-bottom:5px;}
+  .ck-opcoes{display:flex;gap:5px;flex-wrap:wrap;}
+  .ck-item-simples{display:flex;align-items:center;gap:8px;cursor:pointer;}
+  .ck-item-simples .ck-nome{margin-bottom:0;flex:1;}
+  .ck-item-simples input{width:17px;height:17px;accent-color:var(--terracotta);flex-shrink:0;}
+  .ck-unica{font-size:11px;color:var(--graphite);background:var(--paper);padding:2px 8px;border-radius:99px;white-space:nowrap;}
+
+  /* Atas no portal */
+  .ata-portal{border-bottom:1px solid var(--paper);}
+  .ata-portal:last-child{border-bottom:none;}
+  .ata-portal-topo{display:flex;justify-content:space-between;align-items:center;padding:11px 0;cursor:pointer;list-style:none;font-size:13.5px;font-weight:500;}
+  .ata-portal-topo::-webkit-details-marker{display:none;}
+  .ata-chevron{font-size:18px;color:var(--graphite);transition:transform .15s;}
+  .ata-portal[open] .ata-chevron{transform:rotate(90deg);}
+  .ata-portal-corpo{padding:0 0 14px;}
+  .ata-rotulo{font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--terracotta);margin:10px 0 3px;}
+  .ata-texto{font-size:13px;margin:0;white-space:pre-wrap;line-height:1.55;}
+  .ata-campo{font-size:12.5px;margin:0 0 4px;color:var(--graphite);}
   .checklist-item-nome{font-size:13.5px;font-weight:500;display:block;margin-bottom:6px;}
   .opcoes-pills{display:flex;gap:6px;flex-wrap:wrap;}
   .opcao-pill{font-size:12px;padding:6px 12px;border-radius:99px;border:1px solid var(--line);background:#fff;color:var(--graphite);cursor:pointer;}
@@ -187,6 +213,24 @@ async function carregarERenderizar(){
         </div>`).join('')}
     </div>` : ''}
 
+    ${(p.atas||[]).length > 0 ? `
+    <div class="card">
+      <p class="label" style="margin-bottom:10px;">Registro das reuniões</p>
+      ${p.atas.map(a => `
+        <details class="ata-portal">
+          <summary class="ata-portal-topo">
+            <span>Reunião de ${fmtData(a.data)}</span>
+            <span class="ata-chevron">›</span>
+          </summary>
+          <div class="ata-portal-corpo">
+            ${a.participantes ? `<p class="ata-campo"><b>Participantes:</b> ${esc(a.participantes)}</p>` : ''}
+            ${a.decisoes ? `<p class="ata-rotulo">Decisões tomadas</p><p class="ata-texto">${esc(a.decisoes)}</p>` : ''}
+            ${a.pendencias ? `<p class="ata-rotulo">Pendências</p><p class="ata-texto">${esc(a.pendencias)}</p>` : ''}
+            ${a.responsaveis ? `<p class="ata-campo"><b>Responsáveis:</b> ${esc(a.responsaveis)}</p>` : ''}
+          </div>
+        </details>`).join('')}
+    </div>` : ''}
+
     ${(p.aprovacoes||[]).length > 0 ? `
     <div class="card">
       <p class="label" style="margin-bottom:6px;">Entregas</p>
@@ -216,18 +260,7 @@ async function carregarERenderizar(){
           ${(a.imagens||[]).length>0 ? `<div class="aprov-imgs">${a.imagens.map(url => `<img src="${esc(url)}" onclick="event.stopPropagation();window.open('${esc(url)}','_blank')" />`).join('')}</div>` : ''}
           ${a.eh_checklist ? `
             <div onclick="event.stopPropagation();">
-              ${itensCk.map(i => i.opcoes ? `
-                <div class="checklist-item-opcoes">
-                  <span class="checklist-item-nome">${esc(i.item)}</span>
-                  <div class="opcoes-pills">
-                    ${i.opcoes.split(',').map(op => `<button class="opcao-pill ${i.resposta_opcao===op?'selecionada':''}" onclick="escolherOpcaoChecklist('${i.id}','${op.replace(/'/g,"\\'")}')">${esc(op)}</button>`).join('')}
-                  </div>
-                </div>
-              ` : `
-                <label class="checklist-item-cliente">
-                  <input type="checkbox" ${i.marcado?'checked':''} onchange="marcarItemChecklist('${i.id}', this.checked)" />
-                  <span>${esc(i.item)}</span>
-                </label>`).join('')}
+              ${renderChecklistAgrupado(itensCk)}
             </div>
           ` : a.tipo==='dados_contrato' ? `
             <div onclick="event.stopPropagation();">
@@ -264,6 +297,57 @@ async function carregarERenderizar(){
 
     <p class="footer">Essa é uma tela somente de acompanhamento. Qualquer dúvida, fale direto com a equipe da SAMI.</p>
   `;
+}
+
+/* Monta o checklist agrupado por armário, em colunas.
+   Peça com uma opção só vira caixinha de marcar; com várias, vira botões. */
+function renderChecklistAgrupado(itens){
+  if(!itens || itens.length===0) return '<p class="aprov-desc">Nenhum item nesse checklist.</p>';
+
+  const grupos = new Map();
+  itens.forEach(i => {
+    const match = i.item.match(/^(.*)\s\(([^)]+)\)$/);
+    const grupo = match ? match[2] : 'Itens';
+    const nomeLimpo = match ? match[1] : i.item;
+    if(!grupos.has(grupo)) grupos.set(grupo, []);
+    grupos.get(grupo).push({ ...i, nomeLimpo });
+  });
+
+  return Array.from(grupos.entries()).map(([grupo, lista]) => {
+    const feitos = lista.filter(x => x.marcado).length;
+    return `
+    <div class="ck-grupo">
+      <div class="ck-grupo-topo">
+        <span class="ck-grupo-nome">${esc(grupo)}</span>
+        <span class="ck-grupo-contador">${feitos}/${lista.length}</span>
+      </div>
+      <div class="ck-colunas">
+        ${lista.map(i => {
+          const opcoes = i.opcoes ? i.opcoes.split(',') : [];
+          if(opcoes.length === 1){
+            const op = opcoes[0];
+            return `<label class="ck-item ck-item-simples">
+              <input type="checkbox" ${i.marcado?'checked':''} onchange="escolherOpcaoChecklist('${i.id}','${op.replace(/'/g,"\\'")}')" />
+              <span class="ck-nome">${esc(i.nomeLimpo)}</span>
+              <span class="ck-unica">${esc(op)}</span>
+            </label>`;
+          }
+          if(opcoes.length === 0){
+            return `<label class="ck-item ck-item-simples">
+              <input type="checkbox" ${i.marcado?'checked':''} onchange="marcarItemChecklist('${i.id}', this.checked)" />
+              <span class="ck-nome">${esc(i.nomeLimpo)}</span>
+            </label>`;
+          }
+          return `<div class="ck-item">
+            <span class="ck-nome">${esc(i.nomeLimpo)}</span>
+            <div class="ck-opcoes">
+              ${opcoes.map(op => `<button class="opcao-pill ${i.resposta_opcao===op?'selecionada':''}" onclick="escolherOpcaoChecklist('${i.id}','${op.replace(/'/g,"\\'")}')">${esc(op)}</button>`).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function toggleEntrega(id){

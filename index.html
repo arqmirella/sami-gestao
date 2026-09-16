@@ -162,12 +162,14 @@
           </div>
 
           <div class="bloco">
-            <div class="bloco-topo"><h2>Começar agora</h2></div>
+            <div class="bloco-topo"><h2>Atalhos</h2></div>
             <div class="atalhos">
-              <button class="atalho" onclick="acaoRapida('projetos','formNovoProjeto')">Novo projeto</button>
-              <button class="atalho" onclick="acaoRapida('clientes','formNovoCliente')">Novo cliente</button>
-              <button class="atalho" onclick="acaoRapida('tarefas','formNovaTarefa')">Nova tarefa</button>
-              <button class="atalho" onclick="acaoRapida('conteudo','formNovoConteudo')">Novo conteúdo</button>
+              <button class="atalho destaque" onclick="navigate('projetos',{subaba:'tarefas'})">Ver tarefas</button>
+              <button class="atalho destaque" onclick="navigate('projetos')">Ver projetos</button>
+              <button class="atalho" onclick="acaoRapida('projetos','formNovoProjeto')">+ Novo projeto</button>
+              <button class="atalho" onclick="acaoRapida('clientes','formNovoCliente')">+ Novo cliente</button>
+              <button class="atalho" onclick="acaoRapida('tarefas','formNovaTarefa')">+ Nova tarefa</button>
+              <button class="atalho" onclick="acaoRapida('conteudo','formNovoConteudo')">+ Novo conteúdo</button>
             </div>
           </div>
 
@@ -287,13 +289,23 @@
           </div>
         </div>
 
-        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaTarefa')">+ Nova tarefa</button>
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+          <button class="btn" onclick="toggleForm('formNovaTarefa')">+ Nova tarefa</button>
+          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="abrirRotinas()">↻ Rotinas que se repetem</button>
+          <button class="btn-ghost" style="font-size:12px;color:var(--graphite);" onclick="abrirTarefasArquivadas()">ver arquivadas</button>
+        </div>
         <form id="formNovaTarefa" class="form-box hidden" onsubmit="criarTarefaGlobal(event)">
           <input id="ntTitulo" required placeholder="Título da tarefa" />
           <select id="ntProjeto"></select>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:4px;">
+            <label class="mono" style="font-size:10.5px;text-transform:uppercase;color:var(--graphite);flex:1;">Início</label>
+            <label class="mono" style="font-size:10.5px;text-transform:uppercase;color:var(--graphite);flex:1;">Prazo</label>
+            <span style="width:110px;"></span>
+          </div>
           <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
+            <input id="ntDataInicio" type="date" style="flex:1;" />
             <input id="ntPrazo" type="date" style="flex:1;" />
-            <label style="font-size:13px;color:var(--graphite);white-space:nowrap;"><input id="ntTerceirizado" type="checkbox" /> Terceirizado</label>
+            <label style="font-size:13px;color:var(--graphite);white-space:nowrap;width:110px;"><input id="ntTerceirizado" type="checkbox" /> Terceirizado</label>
           </div>
           <p class="label">Responsáveis</p>
           <div id="ntResponsaveis" class="chip-select"></div>
@@ -619,13 +631,49 @@
 
       <!-- Sub-aba: Atas de reunião -->
       <div id="pdtab-atas" class="pd-tabcontent hidden">
-        <button class="btn" style="margin-bottom:16px;" onclick="toggleForm('formNovaAta')">+ Nova ata</button>
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+          <button class="btn" onclick="iniciarReuniaoAoVivo()">● Anotar reunião agora</button>
+          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="toggleForm('formNovaAta')">+ Ata de reunião passada</button>
+        </div>
+
+        <div id="reuniaoAoVivo" class="hidden card" style="margin-bottom:20px;border-color:var(--terracotta);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="timer-dot" style="background:var(--terracotta);animation:timerPulse 1.4s ease-in-out infinite;"></span>
+              <p class="label" style="margin:0;color:var(--terracotta);">Reunião em andamento</p>
+            </div>
+            <span class="mono" id="statusSalvoAta" style="font-size:11px;color:var(--graphite);"></span>
+          </div>
+
+          <input id="avParticipantes" placeholder="Quem está na reunião" oninput="salvarReuniaoAoVivo()" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:12px;" />
+
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Decisões tomadas</label>
+          <textarea id="avDecisoes" rows="7" placeholder="Vai anotando aqui conforme a conversa..." oninput="salvarReuniaoAoVivo()" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:12px;font-size:14px;line-height:1.6;"></textarea>
+
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Pendências</label>
+          <textarea id="avPendencias" rows="4" placeholder="O que ficou pra resolver" oninput="salvarReuniaoAoVivo()" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:12px;font-size:14px;line-height:1.6;"></textarea>
+
+          <input id="avResponsaveis" placeholder="Quem ficou responsável pelo quê" oninput="salvarReuniaoAoVivo()" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:14px;" />
+
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--graphite);margin-bottom:14px;padding:10px;background:var(--paper);border-radius:9px;">
+            <input id="avVisivelCliente" type="checkbox" onchange="salvarReuniaoAoVivo()" />
+            <span>Deixar essa ata visível no portal do cliente</span>
+          </label>
+
+          <div class="form-actions">
+            <button class="btn" onclick="encerrarReuniaoAoVivo()">Encerrar e salvar</button>
+          </div>
+        </div>
+
         <form id="formNovaAta" class="form-box hidden" style="max-width:600px;" onsubmit="criarAta(event)">
           <input id="ataData" type="date" required style="margin-bottom:10px;" />
           <input id="ataParticipantes" placeholder="Participantes" />
           <textarea id="ataDecisoes" placeholder="Decisões tomadas" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
           <textarea id="ataPendencias" placeholder="Pendências" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
           <input id="ataResponsaveis" placeholder="Responsáveis por cada pendência (opcional)" style="margin-bottom:10px;" />
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--graphite);margin-bottom:10px;">
+            <input id="ataVisivelCliente" type="checkbox" /> Visível no portal do cliente
+          </label>
           <div class="form-actions">
             <button type="submit" class="btn">Salvar ata</button>
             <button type="button" class="btn-ghost" onclick="toggleForm('formNovaAta', false)">Cancelar</button>

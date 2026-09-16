@@ -78,6 +78,16 @@ function parseValorBR(texto){
 }
 function fmtDataBR(d){ return new Date(d+'T00:00:00').toLocaleDateString('pt-BR'); }
 
+/* Converte uma data pra "AAAA-MM-DD" usando o calendário local.
+   Não usar toISOString() pra isso: ele converte pra UTC e, no Brasil (UTC-3),
+   devolve o dia anterior quando é fim de tarde/noite. */
+function dataLocalISO(data){
+  const d = data || new Date();
+  const mes = String(d.getMonth()+1).padStart(2,'0');
+  const dia = String(d.getDate()).padStart(2,'0');
+  return `${d.getFullYear()}-${mes}-${dia}`;
+}
+
 /* Cabeçalho e rodapé padrão de todo documento gerado pra impressão/PDF */
 function cabecalhoDocumentoHTML(){
   const logoUrl = new URL('logo-sami.png', window.location.href).href;
@@ -137,6 +147,8 @@ function showApp(){
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('appScreen').style.display = 'flex';
   navigate('inicio');
+  // Cria as tarefas das rotinas que estão na hora (silencioso, não trava a tela)
+  gerarTarefasRecorrentes().catch(e => console.warn('rotinas:', e));
 }
 function showLogin(){
   document.getElementById('appScreen').style.display = 'none';
@@ -324,10 +336,10 @@ async function loadInicio(){
 /* Frase de resumo do dia + os quatro indicadores do topo da Início */
 async function renderResumoEIndicadores(tarefas, compromissos){
   const hoje = new Date(); hoje.setHours(0,0,0,0);
-  const hojeStr = hoje.toISOString().slice(0,10);
+  const hojeStr = dataLocalISO(hoje);
   const limite = new Date(hoje); limite.setDate(limite.getDate() + DIAS_ALERTA_PRAZO);
-  const limiteStr = limite.toISOString().slice(0,10);
-  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+  const limiteStr = dataLocalISO(limite);
+  const inicioMes = dataLocalISO(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
 
   const [{ data: projetosAtivos }, { data: respostasCliente }, { data: parcelasMes }] = await Promise.all([
     sb.from('projetos').select('id').eq('status','em_andamento').eq('is_modelo', false),
@@ -338,7 +350,7 @@ async function renderResumoEIndicadores(tarefas, compromissos){
   const comPrazoHoje = tarefas.filter(t => t.prazo === hojeStr).length;
   const atrasadas = tarefas.filter(t => t.prazo && t.prazo < hojeStr).length;
   const vencendo = tarefas.filter(t => t.prazo && t.prazo >= hojeStr && t.prazo <= limiteStr).length;
-  const compromissosHoje = (compromissos||[]).filter(c => new Date(c.data_hora).toISOString().slice(0,10) === hojeStr);
+  const compromissosHoje = (compromissos||[]).filter(c => dataLocalISO(new Date(c.data_hora)) === hojeStr);
   const respostas = (respostasCliente||[]).length;
   const recebidoMes = (parcelasMes||[]).reduce((s,p) => s + Number(p.valor||0), 0);
 
@@ -377,7 +389,7 @@ async function renderResumoEIndicadores(tarefas, compromissos){
 }
 
 function renderTarefasHoje(tarefas){
-  const hojeStr = new Date().toISOString().slice(0,10);
+  const hojeStr = dataLocalISO();
   const relevantes = tarefas.filter(t => t.prazo && t.prazo <= hojeStr);
   const cont = document.getElementById('tarefasHoje');
 
@@ -707,7 +719,7 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
   ] = await Promise.all([
     sb.from('projetos').select('*, clientes(nome_completo)').eq('id', projetoId).single(),
     sb.from('etapas').select('*').eq('projeto_id', projetoId).order('ordem'),
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,etapa_id,ambiente_id,ambientes(nome)').eq('projeto_id', projetoId).order('criado_em',{ascending:true}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,data_inicio,etapa_id,ambiente_id,ambientes(nome)').eq('projeto_id', projetoId).eq('arquivada', false).order('criado_em',{ascending:true}),
     sb.from('financeiro_parcelas').select('id,descricao,valor,vencimento,status,data_pagamento').eq('projeto_id', projetoId).order('vencimento'),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe(nome)'),
     sb.from('equipe').select('id,nome').eq('ativo', true).order('nome'),
@@ -1221,7 +1233,7 @@ async function adicionarParcelaProjeto(e){
   loadProjetoDetalhe(projetoAtualId);
 }
 async function marcarParcelaProjetoPaga(id){
-  const resultado = await sb.from('financeiro_parcelas').update({ status: 'pago', data_pagamento: new Date().toISOString().slice(0,10) }).eq('id', id);
+  const resultado = await sb.from('financeiro_parcelas').update({ status: 'pago', data_pagamento: dataLocalISO() }).eq('id', id);
   if(checarErro(resultado, 'marcar parcela como paga')) return;
   loadProjetoDetalhe(projetoAtualId);
 }
@@ -1367,13 +1379,21 @@ async function loadTarefas(){
     `<button type="button" class="chip" data-id="${m.id}" onclick="this.classList.toggle('on')">${esc(m.nome)}</button>`
   ).join('');
 
-  const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }, { data: todasEtapas }] = await Promise.all([
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,projeto_id,etapa_id,ambiente_id,ordem_manual,concluida_em,criado_em,projetos(nome),ambientes(nome)').order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
+  const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }, { data: todasEtapas }, { data: temposFechados }] = await Promise.all([
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,data_inicio,projeto_id,etapa_id,ambiente_id,ordem_manual,concluida_em,criado_em,projetos(nome),ambientes(nome)').eq('arquivada', false).order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id,equipe(nome)'),
     sb.from('tarefas_tempo').select('id,tarefa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
     sb.from('etapas').select('id,nome'),
+    sb.from('tarefas_tempo').select('tarefa_id,duracao_segundos').not('duracao_segundos','is',null),
   ]);
   window._etapaNomeGlobalMap = new Map((todasEtapas||[]).map(e => [e.id, e.nome]));
+
+  // Tempo total já cronometrado em cada tarefa (soma de todas as sessões)
+  const totalPorTarefa = new Map();
+  (temposFechados||[]).forEach(t => {
+    totalPorTarefa.set(t.tarefa_id, (totalPorTarefa.get(t.tarefa_id)||0) + (t.duracao_segundos||0));
+  });
+  window._tempoTotalPorTarefa = totalPorTarefa;
 
   const respPorTarefa = new Map();
   (responsaveis||[]).forEach(r => {
@@ -1493,7 +1513,7 @@ function renderKanbanTarefas(){
         const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
         const resp = respPorTarefa.get(t.id) || [];
         const tempoAberto = tempoAbertoPorTarefa.get(t.id);
-        return `<div class="task-card${atrasada?' atrasada':''}" draggable="true" ondragstart="dragStartTarefa(event,'${t.id}')" ondragend="dragEndTarefa(event)">
+        return `<div class="task-card${atrasada?' atrasada':''}" draggable="true" data-tarefa-id="${t.id}" ondragstart="dragStartTarefa(event,'${t.id}')" ondragend="dragEndTarefa(event)">
           <p class="label" style="margin-bottom:2px;"><a href="#" onclick="event.preventDefault();navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--terracotta);">${esc(t.projetos?.nome||'')}</a>${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p>
           <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;">
             <p class="task-title">${esc(t.titulo)}</p>
@@ -1507,7 +1527,7 @@ function renderKanbanTarefas(){
             ${t.terceirizado ? '<span class="badge clay">Terceirizado</span>' : ''}
             ${resp.map(n => `<span class="badge line">${esc(n)}</span>`).join('')}
           </div>
-          ${t.prazo ? `<p style="font-size:12px;margin:0 0 8px;color:${atrasada?'var(--alert)':'var(--graphite)'};">Prazo: ${fmtDataBR(t.prazo)}</p>` : ''}
+          ${(t.data_inicio || t.prazo) ? `<p style="font-size:12px;margin:0 0 8px;color:${atrasada?'var(--alert)':'var(--graphite)'};">${t.data_inicio?`Início: ${fmtDataBR(t.data_inicio)}`:''}${t.data_inicio&&t.prazo?' · ':''}${t.prazo?`Prazo: ${fmtDataBR(t.prazo)}`:''}</p>` : ''}
           ${tempoAberto
             ? `<div class="timer-box running">
                 <p class="timer-box-label"><span class="timer-dot"></span>Cronômetro rodando</p>
@@ -1520,13 +1540,16 @@ function renderKanbanTarefas(){
                 <p class="timer-box-label"><span class="timer-dot"></span>Cronômetro</p>
                 <div class="timer-row">
                   <select id="sel-eq-${t.id}" class="timer-select">
+                    <option value="">Quem vai executar?</option>
                     ${(window._equipeAtiva||[]).map(m => `<option value="${m.id}">${esc(m.nome)}</option>`).join('')}
                   </select>
                   <button class="timer-go" onclick="iniciarCronometro('${t.id}')">▶ Iniciar</button>
                 </div>
               </div>`}
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-            <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="abrirModalEditarTarefa('${t.id}')">ver tempo registrado</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            ${(window._tempoTotalPorTarefa?.get(t.id) || 0) > 0
+              ? `<span class="mono" style="font-size:11.5px;color:var(--terracotta);font-weight:500;">⏱ ${fmtHoras(window._tempoTotalPorTarefa.get(t.id))} no total</span>`
+              : `<span class="mono" style="font-size:11.5px;color:var(--graphite);opacity:.6;">sem tempo registrado</span>`}
             <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="trazerTarefaParaTopo('${t.id}')">▲ pro topo</button>
           </div>
           <div class="move-row">
@@ -1538,7 +1561,8 @@ function renderKanbanTarefas(){
   }).join('');
 }
 
-/* Arrastar e soltar no kanban (computador; no celular use os botões "→") */
+/* Arrastar e soltar no kanban (computador; no celular use os botões "→").
+   Arrastar entre colunas muda o status; arrastar dentro da coluna reordena. */
 let _tarefaArrastadaId = null;
 function dragStartTarefa(e, id){
   _tarefaArrastadaId = id;
@@ -1547,18 +1571,60 @@ function dragStartTarefa(e, id){
 }
 function dragEndTarefa(e){
   e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.drop-marca').forEach(el => el.classList.remove('drop-marca'));
 }
 function dragOverColuna(e, col){
   e.preventDefault();
   col.classList.add('drag-over');
+
+  // Marca visualmente onde a tarefa vai cair
+  document.querySelectorAll('.drop-marca').forEach(el => el.classList.remove('drop-marca'));
+  const alvo = cardSobOPonteiro(col, e.clientY);
+  if(alvo) alvo.classList.add('drop-marca');
 }
+
+/* Descobre sobre qual card o ponteiro está, pra saber onde inserir */
+function cardSobOPonteiro(col, y){
+  const cards = [...col.querySelectorAll('.task-card:not(.dragging)')];
+  for(const card of cards){
+    const caixa = card.getBoundingClientRect();
+    if(y < caixa.top + caixa.height/2) return card;
+  }
+  return null;
+}
+
 async function dropColuna(e, status, col){
   e.preventDefault();
   col.classList.remove('drag-over');
+  document.querySelectorAll('.drop-marca').forEach(el => el.classList.remove('drop-marca'));
   if(!_tarefaArrastadaId) return;
+
   const id = _tarefaArrastadaId;
   _tarefaArrastadaId = null;
-  await moverTarefaKanban(id, status);
+
+  // Descobre a nova posição dentro da coluna
+  const cardAlvo = cardSobOPonteiro(col, e.clientY);
+  const idsNaColuna = [...col.querySelectorAll('.task-card')]
+    .map(c => c.dataset.tarefaId)
+    .filter(tid => tid && tid !== id);
+
+  const posicao = cardAlvo ? idsNaColuna.indexOf(cardAlvo.dataset.tarefaId) : idsNaColuna.length;
+  idsNaColuna.splice(posicao < 0 ? idsNaColuna.length : posicao, 0, id);
+
+  // Regrava a ordem de toda a coluna (espaçado de 100 em 100 pra sobrar folga)
+  const atualizacoes = idsNaColuna.map((tid, i) =>
+    sb.from('tarefas').update({ ordem_manual: (i+1) * 100 }).eq('id', tid)
+  );
+
+  const tarefa = (window._tarefas||[]).find(t => t.id === id);
+  if(tarefa && tarefa.status !== status){
+    const mudancas = { status };
+    if(status==='concluida') mudancas.concluida_em = new Date().toISOString();
+    atualizacoes.push(sb.from('tarefas').update(mudancas).eq('id', id));
+  }
+
+  await Promise.all(atualizacoes);
+  loadTarefas();
 }
 
 const STATUS_PILL_COR = { pendente:'var(--clay)', em_andamento:'var(--terracotta)', concluida:'var(--sage)' };
@@ -1577,9 +1643,11 @@ function renderListaFlatTarefas(){
   const linhaTarefa = (t) => {
     const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
     const resp = (respPorTarefa.get(t.id) || []).join(', ');
-    return `<div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:12px;padding:11px 18px;align-items:center;border-bottom:1px solid var(--line);font-size:13.5px;">
+    const tempoTotal = window._tempoTotalPorTarefa?.get(t.id) || 0;
+    return `<div style="display:grid;grid-template-columns:1fr auto auto auto auto auto;gap:12px;padding:11px 18px;align-items:center;border-bottom:1px solid var(--line);font-size:13.5px;">
       <div><p style="margin:0;">${esc(t.titulo)}</p><p style="margin:2px 0 0;font-size:12.5px;color:var(--graphite);">${esc(t.projetos?.nome||'')}${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p></div>
       <span style="font-size:12px;color:var(--graphite);">${esc(resp)||'—'}</span>
+      <span class="mono" style="font-size:12px;color:${tempoTotal>0?'var(--terracotta)':'var(--graphite)'};white-space:nowrap;">${tempoTotal>0?fmtHoras(tempoTotal):'—'}</span>
       <span style="font-size:12px;color:${atrasada?'var(--alert)':'var(--graphite)'};white-space:nowrap;">${t.prazo?fmtDataBR(t.prazo):'—'}</span>
       <span class="pill" style="color:${atrasada?'var(--alert)':STATUS_PILL_COR[t.status]};border-color:${atrasada?'var(--alert)':STATUS_PILL_COR[t.status]};white-space:nowrap;">${atrasada?'Atrasada':STATUS_TAREFA_LABEL[t.status]}</span>
       <button class="edit-link" onclick="abrirModalEditarTarefa('${t.id}')">editar</button>
@@ -1597,8 +1665,8 @@ function renderListaFlatTarefas(){
   });
 
   const cabecalho = `
-    <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:12px;padding:10px 18px;font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;color:var(--graphite);border-bottom:1px solid var(--line);">
-      <span>Tarefa / Projeto</span><span>Responsáveis</span><span>Prazo</span><span>Status</span><span></span>
+    <div style="display:grid;grid-template-columns:1fr auto auto auto auto auto;gap:12px;padding:10px 18px;font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;color:var(--graphite);border-bottom:1px solid var(--line);">
+      <span>Tarefa / Projeto</span><span>Responsáveis</span><span>Tempo</span><span>Prazo</span><span>Status</span><span></span>
     </div>`;
 
   const gruposHtml = Array.from(grupos.entries()).map(([, itens]) => {
@@ -1630,6 +1698,7 @@ async function criarTarefaGlobal(e){
   const { data: tarefa } = await sb.from('tarefas').insert({
     titulo, projeto_id: projetoId,
     prazo: document.getElementById('ntPrazo').value || null,
+    data_inicio: document.getElementById('ntDataInicio').value || null,
     terceirizado: document.getElementById('ntTerceirizado').checked,
   }).select('id').single();
 
@@ -1656,7 +1725,11 @@ async function iniciarCronometro(tarefaId){
   const sel = document.getElementById('sel-eq-'+tarefaId);
   const equipeId = sel ? sel.value : null;
   if(!equipeId){
-    alert('Cadastre pelo menos uma pessoa ativa em "Equipe" antes de usar o cronômetro.');
+    const temEquipe = (window._equipeAtiva||[]).length > 0;
+    alert(temEquipe
+      ? 'Escolhe quem vai executar essa tarefa antes de iniciar o cronômetro.'
+      : 'Cadastre pelo menos uma pessoa ativa em "Equipe" antes de usar o cronômetro.');
+    if(sel) sel.focus();
     return;
   }
   const resultado = await sb.from('tarefas_tempo').insert({ tarefa_id: tarefaId, equipe_id: equipeId, inicio: new Date().toISOString() });
@@ -1881,7 +1954,7 @@ async function criarParcelaGlobal(e){
   loadContasReceber();
 }
 async function marcarParcelaPaga(id){
-  const resultado = await sb.from('financeiro_parcelas').update({ status:'pago', data_pagamento: new Date().toISOString().slice(0,10) }).eq('id', id);
+  const resultado = await sb.from('financeiro_parcelas').update({ status:'pago', data_pagamento: dataLocalISO() }).eq('id', id);
   if(checarErro(resultado, 'marcar parcela como paga')) return;
   loadContasReceber();
 }
@@ -2879,8 +2952,16 @@ async function abrirModalEditarTarefa(tarefaId){
     <p class="label" style="margin-bottom:14px;">Editar tarefa</p>
     <form onsubmit="salvarEdicaoTarefa(event,'${tarefaId}')">
       <input id="edTarTitulo" required value="${esc(tarefa.titulo)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
-      <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Prazo</label>
-      <input id="edTarPrazo" type="date" value="${tarefa.prazo || ''}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <div style="flex:1;">
+          <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Início</label>
+          <input id="edTarDataInicio" type="date" value="${tarefa.data_inicio || ''}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
+        </div>
+        <div style="flex:1;">
+          <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Prazo</label>
+          <input id="edTarPrazo" type="date" value="${tarefa.prazo || ''}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
+        </div>
+      </div>
       <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Ambiente</label>
       <select id="edTarAmbiente" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;">
         <option value="">Sem ambiente</option>
@@ -2889,26 +2970,23 @@ async function abrirModalEditarTarefa(tarefaId){
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--graphite);margin-bottom:16px;">
         <input id="edTarTerceirizado" type="checkbox" ${tarefa.terceirizado?'checked':''} /> Terceirizado
       </label>
-      <div class="form-actions">
-        <button type="submit" class="btn">Salvar</button>
-        <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+      <div class="form-actions" style="justify-content:space-between;">
+        <div style="display:flex;gap:10px;">
+          <button type="submit" class="btn">Salvar</button>
+          <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+        </div>
+        <button type="button" class="btn-ghost" style="font-size:12px;color:var(--graphite);" onclick="arquivarTarefa('${tarefaId}')">Arquivar</button>
       </div>
     </form>
 
     <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <p class="label" style="margin:0;">Tempo registrado</p>
-        <p class="mono" style="font-size:13px;font-weight:600;color:var(--terracotta);margin:0;">${fmtHoras(totalSegundos)}</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <p class="label" style="margin:0;">Tempo total nessa tarefa</p>
+        <p class="mono" style="font-size:16px;font-weight:600;color:var(--terracotta);margin:0;">${fmtHoras(totalSegundos)}</p>
       </div>
-      <div style="max-height:160px;overflow-y:auto;">
-        ${(registrosTempo||[]).length===0
-          ? '<p class="muted" style="font-size:12.5px;">Nenhum registro de cronômetro ainda.</p>'
-          : registrosTempo.map(r => `
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--paper);">
-              <span>${esc(r.equipe?.nome||'')} · ${new Date(r.inicio).toLocaleDateString('pt-BR')}</span>
-              <span style="color:var(--graphite);">${r.fim ? fmtHoras(r.duracao_segundos||0) : 'em andamento'}</span>
-            </div>`).join('')}
-      </div>
+      ${(registrosTempo||[]).length > 0
+        ? `<p class="muted" style="font-size:11.5px;margin:6px 0 0;">Somado de ${registrosTempo.length} sessão${registrosTempo.length>1?'ões':''} de cronômetro${(registrosTempo||[]).some(r=>!r.fim)?' · uma em andamento agora':''}</p>`
+        : '<p class="muted" style="font-size:12.5px;margin:6px 0 0;">Nenhum registro de cronômetro ainda.</p>'}
     </div>
 
     <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;">
@@ -2949,6 +3027,7 @@ async function salvarEdicaoTarefa(e, tarefaId){
   const resultado = await sb.from('tarefas').update({
     titulo: document.getElementById('edTarTitulo').value.trim(),
     prazo: document.getElementById('edTarPrazo').value || null,
+    data_inicio: document.getElementById('edTarDataInicio').value || null,
     ambiente_id: document.getElementById('edTarAmbiente').value || null,
     terceirizado: document.getElementById('edTarTerceirizado').checked,
   }).eq('id', tarefaId);
@@ -3648,12 +3727,14 @@ async function loadAtas(){
   document.getElementById('listaAtas').innerHTML = (atas||[]).length===0
     ? '<p class="muted">Nenhuma ata registrada ainda.</p>'
     : atas.map(a => `
-      <div class="task-card" style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="task-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
         <div>
           <p style="font-size:14px;font-weight:500;margin:0;">Reunião · ${fmtDataBR(a.data)}</p>
           ${a.participantes ? `<p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${esc(a.participantes)}</p>` : ''}
+          ${a.visivel_cliente ? '<span class="badge line" style="color:var(--sage);margin-top:6px;">visível pro cliente</span>' : ''}
         </div>
-        <div style="display:flex;gap:10px;">
+        <div style="display:flex;gap:10px;flex-shrink:0;">
+          <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="alternarAtaVisivelCliente('${a.id}', ${a.visivel_cliente})">${a.visivel_cliente?'ocultar do cliente':'mostrar pro cliente'}</button>
           <button class="btn-ghost" style="font-size:12px;padding:0;" onclick="abrirAta('${a.id}')">ver / imprimir</button>
           <button class="remove-link" onclick="excluirAta('${a.id}')">remover</button>
         </div>
@@ -3671,6 +3752,7 @@ async function criarAta(e){
     decisoes: document.getElementById('ataDecisoes').value.trim() || null,
     pendencias: document.getElementById('ataPendencias').value.trim() || null,
     responsaveis: document.getElementById('ataResponsaveis').value.trim() || null,
+    visivel_cliente: document.getElementById('ataVisivelCliente').checked,
   });
   if(checarErro(resultado, 'salvar ata')) return;
   e.target.reset();
@@ -4532,7 +4614,7 @@ async function loadContrato(){
 
   if((contratosExistentes||[]).length === 0){
     document.getElementById('ctEscopo').value = ESCOPO_PADRAO_CONTRATO;
-    document.getElementById('ctDataContrato').value = new Date().toISOString().slice(0,10);
+    document.getElementById('ctDataContrato').value = dataLocalISO();
     if(dadosProjetoAtual?.cliente_id){
       const { data: cliente } = await sb.from('clientes').select('nome_completo,cpf,rg').eq('id', dadosProjetoAtual.cliente_id).single();
       if(cliente){
@@ -4555,7 +4637,7 @@ async function loadContrato(){
     document.getElementById('ctPrazoAP').value = ultimo.prazo_ap || 25;
     document.getElementById('ctPrazoPE').value = ultimo.prazo_pe || 30;
     document.getElementById('ctCidadeForo').value = ultimo.cidade_foro || 'Jundiaí';
-    document.getElementById('ctDataContrato').value = new Date().toISOString().slice(0,10);
+    document.getElementById('ctDataContrato').value = dataLocalISO();
   }
 
   const linkPasta = configData?.link_pasta_contratos || '';
@@ -4606,7 +4688,7 @@ async function salvarEImprimirContrato(e){
     prazo_ap: Number(document.getElementById('ctPrazoAP').value) || 25,
     prazo_pe: Number(document.getElementById('ctPrazoPE').value) || 30,
     cidade_foro: document.getElementById('ctCidadeForo').value.trim() || 'Jundiaí',
-    data_contrato: document.getElementById('ctDataContrato').value || new Date().toISOString().slice(0,10),
+    data_contrato: document.getElementById('ctDataContrato').value || dataLocalISO(),
   };
   const resultado = await sb.from('contratos').insert(dados).select('*').single();
   if(checarErro(resultado, 'salvar contrato')) return;
@@ -4805,7 +4887,7 @@ async function gerarTermoFinal(){
   janela.document.close();
 }
 async function marcarTermoFinalAssinado(){
-  const resultado = await sb.from('projetos').update({ termo_final_status:'assinado', termo_final_data: new Date().toISOString().slice(0,10) }).eq('id', projetoAtualId);
+  const resultado = await sb.from('projetos').update({ termo_final_status:'assinado', termo_final_data: dataLocalISO() }).eq('id', projetoAtualId);
   if(checarErro(resultado, 'marcar termo final')) return;
   loadProjetoDetalhe(projetoAtualId);
 }
@@ -4838,7 +4920,7 @@ async function gerarAutorizacaoImagem(){
   janela.document.close();
 }
 async function marcarAutorizacaoImagemAssinada(){
-  const resultado = await sb.from('projetos').update({ autorizacao_imagem_status:'assinado', autorizacao_imagem_data: new Date().toISOString().slice(0,10) }).eq('id', projetoAtualId);
+  const resultado = await sb.from('projetos').update({ autorizacao_imagem_status:'assinado', autorizacao_imagem_data: dataLocalISO() }).eq('id', projetoAtualId);
   if(checarErro(resultado, 'marcar autorização de imagem')) return;
   loadProjetoDetalhe(projetoAtualId);
 }
@@ -5043,7 +5125,7 @@ async function exportarBackup(){
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `backup-sami-${new Date().toISOString().slice(0,10)}.csv`;
+  link.download = `backup-sami-${dataLocalISO()}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 
@@ -5194,4 +5276,235 @@ async function atualizarStatusRoteiro(id, status){
 
 async function excluirRoteiro(id){
   await excluirComConfirmacao('conteudo_roteiros', id, 'essa ideia de vídeo', () => loadRoteiros());
+}
+
+/* ================= ARQUIVAR TAREFA ================= */
+async function arquivarTarefa(id){
+  if(!confirm('Arquivar essa tarefa? Ela some do kanban mas continua guardada — o tempo cronometrado e o histórico não se perdem.')) return;
+  const r = await sb.from('tarefas').update({ arquivada: true }).eq('id', id);
+  if(checarErro(r, 'arquivar tarefa')) return;
+  fecharModalEditar();
+  loadTarefas();
+  if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
+}
+
+async function abrirTarefasArquivadas(){
+  const { data: arquivadas } = await sb
+    .from('tarefas')
+    .select('id,titulo,status,prazo,projetos(nome),ambientes(nome)')
+    .eq('arquivada', true)
+    .order('criado_em', { ascending: false });
+
+  abrirModal(`
+    <p class="label" style="margin-bottom:6px;">Tarefas arquivadas</p>
+    <p class="muted" style="margin-top:0;margin-bottom:14px;">Elas não aparecem no kanban, mas continuam salvas. Dá pra trazer de volta a qualquer momento.</p>
+    <div style="max-height:360px;overflow-y:auto;">
+      ${(arquivadas||[]).length===0
+        ? '<p class="muted">Nenhuma tarefa arquivada.</p>'
+        : arquivadas.map(t => `
+          <div class="quicklink-item">
+            <div>
+              <p style="margin:0;font-size:13.5px;">${esc(t.titulo)}</p>
+              <p style="margin:2px 0 0;font-size:12px;color:var(--graphite);">${esc(t.projetos?.nome||'')}${t.ambientes?.nome?` · ${esc(t.ambientes.nome)}`:''}</p>
+            </div>
+            <button class="edit-link" onclick="desarquivarTarefa('${t.id}')">restaurar</button>
+          </div>`).join('')}
+    </div>
+    <div class="form-actions" style="margin-top:16px;">
+      <button class="btn-ghost" onclick="fecharModalEditar()">Fechar</button>
+    </div>
+  `);
+}
+
+async function desarquivarTarefa(id){
+  const r = await sb.from('tarefas').update({ arquivada: false }).eq('id', id);
+  if(checarErro(r, 'restaurar tarefa')) return;
+  abrirTarefasArquivadas();
+  loadTarefas();
+}
+
+/* ================= ROTINAS RECORRENTES ================= */
+const FREQUENCIA_LABEL = { diaria:'Todo dia', semanal:'Toda semana', quinzenal:'A cada 15 dias', mensal:'Todo mês' };
+
+async function abrirRotinas(){
+  const [{ data: rotinas }, { data: projetos }] = await Promise.all([
+    sb.from('tarefas_recorrentes').select('*, projetos(nome)').order('criado_em',{ascending:false}),
+    sb.from('projetos').select('id,nome').eq('is_modelo', false).order('nome'),
+  ]);
+
+  abrirModal(`
+    <p class="label" style="margin-bottom:6px;">Rotinas que se repetem</p>
+    <p class="muted" style="margin-top:0;margin-bottom:14px;">Tarefas que o sistema recria sozinho na frequência escolhida — ex: toda segunda "revisar prazos da semana".</p>
+
+    <form onsubmit="criarRotina(event)" style="background:var(--paper);border-radius:10px;padding:12px;margin-bottom:16px;">
+      <input id="roTitulo" required placeholder="O que se repete (ex: Revisar prazos da semana)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:8px;" />
+      <select id="roProjeto" required style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:8px;">
+        <option value="">Escolha o projeto onde a tarefa será criada</option>
+        ${(projetos||[]).map(p => `<option value="${p.id}">${esc(p.nome)}</option>`).join('')}
+      </select>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <select id="roFrequencia" onchange="ajustarCamposRotina()" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;">
+          ${Object.entries(FREQUENCIA_LABEL).map(([v,l]) => `<option value="${v}">${l}</option>`).join('')}
+        </select>
+        <select id="roDiaSemana" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;">
+          ${DIAS_SEMANA.map((d,i) => `<option value="${i}" ${i===1?'selected':''}>${d}</option>`).join('')}
+        </select>
+        <input id="roDiaMes" type="number" min="1" max="28" value="1" placeholder="dia" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;display:none;" />
+      </div>
+      <button class="btn" style="width:100%;">+ Criar rotina</button>
+    </form>
+
+    <div style="max-height:260px;overflow-y:auto;">
+      ${(rotinas||[]).length===0
+        ? '<p class="muted">Nenhuma rotina cadastrada ainda.</p>'
+        : rotinas.map(r => `
+          <div class="quicklink-item">
+            <div>
+              <p style="margin:0;font-size:13.5px;${r.ativa?'':'opacity:.5;text-decoration:line-through;'}">${esc(r.titulo)}</p>
+              <p style="margin:2px 0 0;font-size:12px;color:var(--graphite);">
+                ${FREQUENCIA_LABEL[r.frequencia]}${r.frequencia==='semanal'||r.frequencia==='quinzenal' ? ` · ${DIAS_SEMANA[r.dia_semana||1]}` : ''}${r.frequencia==='mensal' ? ` · dia ${r.dia_mes||1}` : ''}${r.projetos?.nome ? ` · ${esc(r.projetos.nome)}` : ''}
+              </p>
+            </div>
+            <span style="display:flex;gap:10px;">
+              <button class="edit-link" onclick="alternarRotina('${r.id}', ${r.ativa})">${r.ativa?'pausar':'ativar'}</button>
+              <button class="remove-link" onclick="excluirRotina('${r.id}')">remover</button>
+            </span>
+          </div>`).join('')}
+    </div>
+    <div class="form-actions" style="margin-top:16px;">
+      <button class="btn-ghost" onclick="fecharModalEditar()">Fechar</button>
+    </div>
+  `);
+  ajustarCamposRotina();
+}
+
+function ajustarCamposRotina(){
+  const freq = document.getElementById('roFrequencia')?.value;
+  if(!freq) return;
+  document.getElementById('roDiaSemana').style.display = (freq==='semanal'||freq==='quinzenal') ? '' : 'none';
+  document.getElementById('roDiaMes').style.display = freq==='mensal' ? '' : 'none';
+}
+
+async function criarRotina(e){
+  e.preventDefault();
+  const titulo = document.getElementById('roTitulo').value.trim();
+  if(!titulo) return;
+  const freq = document.getElementById('roFrequencia').value;
+  const r = await sb.from('tarefas_recorrentes').insert({
+    titulo,
+    projeto_id: document.getElementById('roProjeto').value || null,
+    frequencia: freq,
+    dia_semana: (freq==='semanal'||freq==='quinzenal') ? Number(document.getElementById('roDiaSemana').value) : null,
+    dia_mes: freq==='mensal' ? Number(document.getElementById('roDiaMes').value) : null,
+  });
+  if(checarErro(r, 'criar rotina')) return;
+  abrirRotinas();
+}
+
+async function alternarRotina(id, ativa){
+  const r = await sb.from('tarefas_recorrentes').update({ ativa: !ativa }).eq('id', id);
+  if(checarErro(r, 'atualizar rotina')) return;
+  abrirRotinas();
+}
+
+async function excluirRotina(id){
+  if(!confirm('Remover essa rotina? As tarefas que ela já criou continuam lá.')) return;
+  await sb.from('tarefas_recorrentes').delete().eq('id', id);
+  abrirRotinas();
+}
+
+/* Verifica as rotinas e cria as tarefas que estão na hora — roda ao abrir o sistema */
+async function gerarTarefasRecorrentes(){
+  const { data: rotinas } = await sb.from('tarefas_recorrentes').select('*').eq('ativa', true);
+  if(!rotinas || rotinas.length===0) return;
+
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const hojeStr = dataLocalISO(hoje);
+  const novas = [];
+  const idsGerados = [];
+
+  for(const r of rotinas){
+    if(r.ultima_geracao === hojeStr) continue;
+    const ultima = r.ultima_geracao ? new Date(r.ultima_geracao+'T00:00:00') : null;
+    const diasDesdeUltima = ultima ? Math.round((hoje - ultima)/(1000*60*60*24)) : 999;
+
+    let deveCriar = false;
+    if(r.frequencia === 'diaria') deveCriar = diasDesdeUltima >= 1;
+    else if(r.frequencia === 'semanal') deveCriar = hoje.getDay() === (r.dia_semana ?? 1) && diasDesdeUltima >= 7;
+    else if(r.frequencia === 'quinzenal') deveCriar = hoje.getDay() === (r.dia_semana ?? 1) && diasDesdeUltima >= 14;
+    else if(r.frequencia === 'mensal') deveCriar = hoje.getDate() === (r.dia_mes ?? 1) && diasDesdeUltima >= 28;
+
+    if(deveCriar && r.projeto_id){
+      novas.push({ projeto_id: r.projeto_id, titulo: r.titulo, prazo: hojeStr });
+      idsGerados.push(r.id);
+    }
+  }
+
+  if(novas.length > 0) await sb.from('tarefas').insert(novas);
+  if(idsGerados.length > 0) await sb.from('tarefas_recorrentes').update({ ultima_geracao: hojeStr }).in('id', idsGerados);
+}
+
+/* ================= REUNIÃO AO VIVO (ata que salva sozinha) ================= */
+let _ataAoVivoId = null;
+let _timerSalvarAta = null;
+
+async function iniciarReuniaoAoVivo(){
+  const resultado = await sb.from('atas_reuniao').insert({
+    projeto_id: projetoAtualId,
+    data: dataLocalISO(),
+  }).select('id').single();
+  if(checarErro(resultado, 'iniciar ata')) return;
+
+  _ataAoVivoId = resultado.data.id;
+  document.getElementById('avParticipantes').value = '';
+  document.getElementById('avDecisoes').value = '';
+  document.getElementById('avPendencias').value = '';
+  document.getElementById('avResponsaveis').value = '';
+  document.getElementById('avVisivelCliente').checked = false;
+  document.getElementById('statusSalvoAta').textContent = '';
+  document.getElementById('reuniaoAoVivo').classList.remove('hidden');
+  toggleForm('formNovaAta', false);
+  document.getElementById('avDecisoes').focus();
+}
+
+/* Salva sozinho enquanto digita, com uma folga de 1,5s pra não gravar a cada tecla */
+function salvarReuniaoAoVivo(){
+  if(!_ataAoVivoId) return;
+  document.getElementById('statusSalvoAta').textContent = 'salvando...';
+  clearTimeout(_timerSalvarAta);
+  _timerSalvarAta = setTimeout(async () => {
+    const r = await sb.from('atas_reuniao').update({
+      participantes: document.getElementById('avParticipantes').value.trim() || null,
+      decisoes: document.getElementById('avDecisoes').value.trim() || null,
+      pendencias: document.getElementById('avPendencias').value.trim() || null,
+      responsaveis: document.getElementById('avResponsaveis').value.trim() || null,
+      visivel_cliente: document.getElementById('avVisivelCliente').checked,
+    }).eq('id', _ataAoVivoId);
+    const status = document.getElementById('statusSalvoAta');
+    if(r.error){ status.textContent = 'erro ao salvar'; status.style.color = 'var(--alert)'; return; }
+    status.textContent = `salvo às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`;
+    status.style.color = 'var(--sage)';
+  }, 1500);
+}
+
+async function encerrarReuniaoAoVivo(){
+  clearTimeout(_timerSalvarAta);
+  if(_ataAoVivoId){
+    await sb.from('atas_reuniao').update({
+      participantes: document.getElementById('avParticipantes').value.trim() || null,
+      decisoes: document.getElementById('avDecisoes').value.trim() || null,
+      pendencias: document.getElementById('avPendencias').value.trim() || null,
+      responsaveis: document.getElementById('avResponsaveis').value.trim() || null,
+      visivel_cliente: document.getElementById('avVisivelCliente').checked,
+    }).eq('id', _ataAoVivoId);
+  }
+  _ataAoVivoId = null;
+  document.getElementById('reuniaoAoVivo').classList.add('hidden');
+  loadAtas();
+}
+
+async function alternarAtaVisivelCliente(id, visivelAtual){
+  const r = await sb.from('atas_reuniao').update({ visivel_cliente: !visivelAtual }).eq('id', id);
+  if(checarErro(r, 'atualizar visibilidade da ata')) return;
+  loadAtas();
 }

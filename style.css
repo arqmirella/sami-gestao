@@ -77,6 +77,7 @@
   .kanban-col.drag-over{background:rgba(193,96,46,.15);outline:2px dashed var(--terracotta);outline-offset:-2px;}
   .task-card[draggable="true"]{cursor:grab;}
   .task-card.dragging{opacity:.4;cursor:grabbing;}
+  .task-card.drop-marca{border-top:3px solid var(--terracotta);padding-top:13px;}
   .col-header{display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:0 4px;}
   .col-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
   .col-dot.pendente{background:var(--clay);}
@@ -100,6 +101,8 @@
   .timer-row{display:flex;gap:6px;}
   .timer-select{flex:1;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:12.5px;background:#fff;color:var(--ink);}
   .timer-select:focus{outline:none;border-color:var(--terracotta);}
+  /* Enquanto ninguém foi escolhido, o campo fica em cinza claro */
+  .timer-select:invalid,.timer-select option[value=""]{color:var(--graphite);}
   .timer-go{font-family:'IBM Plex Mono',monospace;font-size:11.5px;text-transform:uppercase;padding:6px 12px;border:none;border-radius:8px;cursor:pointer;background:var(--sage);color:#fff;white-space:nowrap;}
   .timer-running-info{display:flex;justify-content:space-between;align-items:center;gap:8px;}
   .timer-running-text{font-size:12px;color:var(--ink);}
@@ -414,3 +417,34 @@
     .indicadores{grid-template-columns:1fr 1fr;}
     .colunas-inicio{grid-template-columns:1fr;}
   }
+
+  /* ============================================================
+     AJUSTES DE ACABAMENTO — contornos mais definidos
+     ============================================================ */
+
+  /* Cards e caixas com borda um pouco mais presente, pra setorizar melhor */
+  .card{border-color:#DCD2C4;}
+  .bloco .card{box-shadow:0 1px 3px rgba(33,28,24,.05);}
+
+  /* Blocos da Início ganham um respiro e uma separação mais clara */
+  .bloco-topo{border-bottom:1px solid var(--line);padding-bottom:8px;}
+  .bloco-topo h2{letter-spacing:-.005em;}
+
+  /* Atalho em destaque (Ver tarefas / Ver projetos) */
+  .atalho.destaque{background:var(--terracotta);color:#fff;border-color:var(--terracotta);font-weight:500;}
+  .atalho.destaque:hover{background:var(--terracottaDark);color:#fff;border-color:var(--terracottaDark);}
+
+  /* Cards de projeto na Início: maiores e com foto mais alta */
+  #resumoProjetos{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px;}
+  #resumoProjetos .proj-card{padding:0;overflow:hidden;border-color:#DCD2C4;}
+  #resumoProjetos .proj-thumb{height:120px;border-radius:0;margin-bottom:0 !important;}
+  #resumoProjetos .proj-card > *:not(.proj-thumb){padding-left:15px;padding-right:15px;}
+  #resumoProjetos .proj-card > .label{padding-top:13px;}
+  #resumoProjetos .proj-card > .barcaption{padding-bottom:14px;}
+  #resumoProjetos .proj-title{font-size:15px;}
+
+  /* Agenda do Google alinhada com o fim da coluna da esquerda */
+  #blocoGoogleAgenda iframe{height:260px;}
+
+  /* Sub-abas com contorno próprio, separando melhor as seções */
+  .pj-tabcontent, .fin-tabcontent, .ct-tabcontent{padding-top:4px;}
