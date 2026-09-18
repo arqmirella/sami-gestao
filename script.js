@@ -206,11 +206,17 @@ function trocarAbaProjetosModulo(tab){
 }
 
 async function loadDashboardProjetos(){
-  const [{ data: projetos }, { data: tarefas }, { data: respostasCliente }] = await Promise.all([
+  const [{ data: projetos }, { data: tarefas, error: erroTarefas }, { data: respostasCliente }] = await Promise.all([
     sb.from('projetos').select('id,status').eq('is_modelo', false),
-    sb.from('tarefas').select('id,titulo,status,prazo,projeto_id,projetos(nome)').order('prazo', { ascending: true }),
+    sb.from('tarefas').select('id,titulo,status,prazo,projeto_id,projetos(nome)').eq('arquivada', false).order('prazo', { ascending: true }),
     sb.from('aprovacoes_cliente').select('id,titulo,status,data_resposta,projeto_id,projetos(nome)').neq('status','pendente').eq('visto_pela_equipe', false).order('data_resposta',{ascending:false}),
   ]);
+
+  if(erroTarefas){
+    console.error('tarefas (dashboard):', erroTarefas);
+    alert('Não consegui carregar as tarefas no Dashboard:\n' + erroTarefas.message +
+      '\n\nSe a mensagem falar de alguma coluna, é sinal de que falta rodar um SQL no Supabase.');
+  }
 
   const totalProjetos = (projetos||[]).length;
   const emAndamento = (projetos||[]).filter(p => p.status==='em_andamento').length;
@@ -310,17 +316,23 @@ async function loadInicio(){
   const nomeSalvo = localStorage.getItem('sami_nome_recado');
   if(nomeSalvo) document.getElementById('rcAutor').value = nomeSalvo;
 
-  const [{ data: compromissos }, { data: projetos }, { data: execucao }, { data: linksRede }, { data: linksConhecimento }, { data: tarefasHoje }, { data: recados }, { data: clientesAniv }, { data: equipeAniv }] = await Promise.all([
+  const [{ data: compromissos }, { data: projetos }, { data: execucao }, { data: linksRede }, { data: linksConhecimento }, { data: tarefasHoje, error: erroTarefas }, { data: recados }, { data: clientesAniv }, { data: equipeAniv }] = await Promise.all([
     sb.from('compromissos').select('id, titulo, data_hora, local, projeto_id, projetos(nome)').order('data_hora', { ascending: true }),
     sb.from('projetos').select('id,nome,cliente,cliente_id,status,capa_url,clientes(nome_completo)').eq('status','em_andamento').eq('is_modelo', false).order('criado_em',{ascending:false}).limit(4),
     sb.from('v_projetos_execucao').select('projeto_id,percentual_execucao,total_tarefas'),
     sb.from('links_rapidos').select('*').eq('categoria','rede_social').order('ordem'),
     sb.from('links_rapidos').select('*').eq('categoria','conhecimento').order('ordem'),
-    sb.from('tarefas').select('id,titulo,status,prazo,projeto_id,projetos(nome)').neq('status','concluida').order('prazo',{ascending:true}),
+    sb.from('tarefas').select('id,titulo,status,prazo,projeto_id,projetos(nome)').neq('status','concluida').eq('arquivada', false).order('prazo',{ascending:true}),
     sb.from('mural_recados').select('id,autor_nome,texto,criado_em').order('criado_em',{ascending:false}).limit(20),
     sb.from('clientes').select('nome_completo,data_nascimento').not('data_nascimento','is',null),
     sb.from('equipe').select('nome,data_nascimento').eq('ativo',true).not('data_nascimento','is',null),
   ]);
+
+  if(erroTarefas){
+    console.error('tarefas (inicio):', erroTarefas);
+    alert('Não consegui carregar as tarefas na tela Início:\n' + erroTarefas.message +
+      '\n\nSe a mensagem falar de alguma coluna, é sinal de que falta rodar um SQL no Supabase.');
+  }
 
   window._compromissos = compromissos || [];
   renderAniversarios(clientesAniv||[], equipeAniv||[]);
@@ -751,6 +763,15 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
   const equipeMap = new Map((equipe||[]).map(m => [m.id, m.nome]));
   const execEtapaMap = new Map((execEtapas||[]).map(e => [e.etapa_id, e]));
   const etapaNomeMap = new Map((etapas||[]).map(e => [e.id, e.nome]));
+
+  /* Tarefa sem prazo próprio herda o prazo (data_fim) da etapa dela */
+  const etapaPrazoMap = new Map((etapas||[]).map(e => [e.id, e.data_fim]));
+  (tarefas||[]).forEach(t => {
+    if(!t.prazo && t.etapa_id && etapaPrazoMap.get(t.etapa_id)){
+      t.prazo = etapaPrazoMap.get(t.etapa_id);
+      t.prazo_herdado = true;
+    }
+  });
 
   document.getElementById('etResponsavel').innerHTML = '<option value="">Sem responsável</option>' + (equipe||[]).map(m => `<option value="${m.id}">${esc(m.nome)}</option>`).join('');
   document.getElementById('etBloqueadaPor').innerHTML = '<option value="">Não depende de outra etapa</option>' + (etapas||[]).map(et => `<option value="${et.id}">${esc(et.nome)}</option>`).join('');
@@ -1392,10 +1413,20 @@ async function loadTarefas(){
     sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,data_inicio,projeto_id,etapa_id,ambiente_id,ordem_manual,concluida_em,criado_em,projetos(nome),ambientes(nome)').eq('arquivada', false).order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id,equipe(nome)'),
     sb.from('tarefas_tempo').select('id,tarefa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
-    sb.from('etapas').select('id,nome'),
+    sb.from('etapas').select('id,nome,data_fim'),
     sb.from('tarefas_tempo').select('tarefa_id,duracao_segundos').not('duracao_segundos','is',null),
   ]);
   window._etapaNomeGlobalMap = new Map((todasEtapas||[]).map(e => [e.id, e.nome]));
+  window._etapaPrazoMap = new Map((todasEtapas||[]).map(e => [e.id, e.data_fim]));
+
+  /* Tarefa sem prazo próprio herda o prazo da etapa dela.
+     Assim você define a data uma vez na etapa e vale pra todas as tarefas dentro. */
+  (tarefas||[]).forEach(t => {
+    if(!t.prazo && t.etapa_id && window._etapaPrazoMap.get(t.etapa_id)){
+      t.prazo = window._etapaPrazoMap.get(t.etapa_id);
+      t.prazo_herdado = true;
+    }
+  });
 
   // Tempo total já cronometrado em cada tarefa (soma de todas as sessões)
   const totalPorTarefa = new Map();
@@ -1536,7 +1567,7 @@ function renderKanbanTarefas(){
             ${t.terceirizado ? '<span class="badge clay">Terceirizado</span>' : ''}
             ${resp.map(n => `<span class="badge line">${esc(n)}</span>`).join('')}
           </div>
-          ${(t.data_inicio || t.prazo) ? `<p style="font-size:12px;margin:0 0 8px;color:${atrasada?'var(--alert)':'var(--graphite)'};">${t.data_inicio?`Início: ${fmtDataBR(t.data_inicio)}`:''}${t.data_inicio&&t.prazo?' · ':''}${t.prazo?`Prazo: ${fmtDataBR(t.prazo)}`:''}</p>` : ''}
+          ${(t.data_inicio || t.prazo) ? `<p style="font-size:12px;margin:0 0 8px;color:${atrasada?'var(--alert)':'var(--graphite)'};">${t.data_inicio?`Início: ${fmtDataBR(t.data_inicio)}`:''}${t.data_inicio&&t.prazo?' · ':''}${t.prazo?`Prazo: ${fmtDataBR(t.prazo)}${t.prazo_herdado?' <span style="opacity:.7;font-size:11px;">(da etapa)</span>':''}`:''}</p>` : ''}
           ${tempoAberto
             ? `<div class="timer-box running">
                 <p class="timer-box-label"><span class="timer-dot"></span>Cronômetro rodando</p>
@@ -3008,6 +3039,7 @@ async function abrirModalEditarTarefa(tarefaId){
           <input id="edTarPrazo" type="date" value="${tarefa.prazo || ''}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
         </div>
       </div>
+      ${!tarefa.prazo ? '<p class="muted" style="font-size:11.5px;margin:-4px 0 10px;">Sem prazo próprio: essa tarefa usa a data de fim da etapa. Preencha só se essa tarefa tiver um prazo diferente.</p>' : ''}
       <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Ambiente</label>
       <select id="edTarAmbiente" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;">
         <option value="">Sem ambiente</option>
