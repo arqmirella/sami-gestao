@@ -162,17 +162,38 @@ function navigate(view, opts){
   opts = opts || {};
   VIEWS.forEach(v => document.getElementById('view-'+v).classList.toggle('hidden', v!==view));
   document.querySelectorAll('.navbtn').forEach(b => b.classList.toggle('active', b.dataset.view===view));
+
+  // "projeto-detalhe" e "cliente-detalhe" mantêm o módulo pai marcado no menu
+  const viewMenu = view==='projeto-detalhe' ? 'projetos' : view==='cliente-detalhe' ? 'clientes' : view;
+  document.querySelectorAll('.navbtn-pai').forEach(b => b.classList.toggle('on', b.dataset.view===viewMenu));
+  document.querySelectorAll('.nav-sub').forEach(el => el.classList.toggle('aberto', el.dataset.sub===viewMenu));
+
+  const subabaPadrao = { projetos:'dashboard', conteudo:'planner', financeiro:'visao' };
+  const subaba = opts.subaba || subabaPadrao[view];
+
   if(view==='inicio') loadInicio();
-  if(view==='projetos') trocarAbaProjetosModulo(opts.subaba || 'dashboard');
+  if(view==='projetos') trocarAbaProjetosModulo(subaba);
   if(view==='clientes') loadClientes();
-  if(view==='conteudo') trocarAbaConteudo('planner');
-  if(view==='financeiro') trocarAbaFinanceiro('visao');
+  if(view==='conteudo') trocarAbaConteudo(subaba);
+  if(view==='financeiro') trocarAbaFinanceiro(subaba);
   if(view==='fornecedores') loadFornecedores();
   if(view==='equipe') loadEquipe();
   if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId, opts.aba);
   if(view==='cliente-detalhe' && opts.clienteId) loadClienteDetalhe(opts.clienteId);
+
+  marcarSubmenuAtivo(viewMenu, subaba);
   fecharMenuMobile();
   window.scrollTo(0, 0);
+}
+
+/* Destaca no menu lateral qual sub-aba está aberta */
+function marcarSubmenuAtivo(view, subaba){
+  document.querySelectorAll('.nav-sub').forEach(grupo => {
+    const ehAtual = grupo.dataset.sub === view;
+    grupo.querySelectorAll('.navbtn-sub').forEach(b => {
+      b.classList.toggle('on', ehAtual && b.dataset.subaba === subaba);
+    });
+  });
 }
 
 function toggleMenuMobile(){
@@ -197,6 +218,7 @@ function acaoRapida(view, formId){
 
 /* ---- Módulo Projetos: Dashboard (com lista de projetos) / Tarefas / Cronograma ---- */
 function trocarAbaProjetosModulo(tab){
+  marcarSubmenuAtivo('projetos', tab);
   document.querySelectorAll('.pj-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'pjtab-'+tab));
   document.querySelectorAll('.pj-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
   if(tab==='dashboard'){ loadDashboardProjetos(); loadProjetos(); }
@@ -316,10 +338,12 @@ async function loadInicio(){
   const nomeSalvo = localStorage.getItem('sami_nome_recado');
   if(nomeSalvo) document.getElementById('rcAutor').value = nomeSalvo;
 
-  const [{ data: compromissos }, { data: projetos }, { data: execucao }, { data: linksRede }, { data: linksConhecimento }, { data: tarefasHoje, error: erroTarefas }, { data: recados }, { data: clientesAniv }, { data: equipeAniv }] = await Promise.all([
+  const [{ data: compromissos }, { data: projetos }, { data: execucao }, { data: todasEtapasInicio }, { data: execEtapasInicio }, { data: linksRede }, { data: linksConhecimento }, { data: tarefasHoje, error: erroTarefas }, { data: recados }, { data: clientesAniv }, { data: equipeAniv }] = await Promise.all([
     sb.from('compromissos').select('id, titulo, data_hora, local, projeto_id, projetos(nome)').order('data_hora', { ascending: true }),
     sb.from('projetos').select('id,nome,cliente,cliente_id,status,capa_url,clientes(nome_completo)').eq('status','em_andamento').eq('is_modelo', false).order('criado_em',{ascending:false}).limit(4),
     sb.from('v_projetos_execucao').select('projeto_id,percentual_execucao,total_tarefas'),
+    sb.from('etapas').select('id,nome,ordem,projeto_id'),
+    sb.from('v_etapas_execucao').select('etapa_id,percentual_execucao'),
     sb.from('links_rapidos').select('*').eq('categoria','rede_social').order('ordem'),
     sb.from('links_rapidos').select('*').eq('categoria','conhecimento').order('ordem'),
     sb.from('tarefas').select('id,titulo,status,prazo,projeto_id,projetos(nome)').neq('status','concluida').eq('arquivada', false).order('prazo',{ascending:true}),
@@ -338,7 +362,7 @@ async function loadInicio(){
   renderAniversarios(clientesAniv||[], equipeAniv||[]);
   renderCalendario();
   renderCompromissos();
-  renderResumoProjetos(projetos||[], execucao||[]);
+  renderResumoProjetos(projetos||[], execucao||[], todasEtapasInicio||[], execEtapasInicio||[]);
   renderLinksRapidos(linksRede||[], linksConhecimento||[]);
   renderTarefasHoje(tarefasHoje||[]);
   renderRecados(recados||[]);
@@ -401,26 +425,67 @@ async function renderResumoEIndicadores(tarefas, compromissos){
     </div>`;
 }
 
+let abaFocoAtual = 'hoje';
+
+function trocarAbaFoco(aba){
+  abaFocoAtual = aba;
+  document.querySelectorAll('#abasFoco .chip').forEach(c => c.classList.toggle('on', c.dataset.foco===aba));
+  renderTarefasHoje(window._tarefasFoco || []);
+}
+
 function renderTarefasHoje(tarefas){
-  const hojeStr = dataLocalISO();
-  const relevantes = tarefas.filter(t => t.prazo && t.prazo <= hojeStr);
+  window._tarefasFoco = tarefas;
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const hojeStr = dataLocalISO(hoje);
+  const fimSemana = new Date(hoje); fimSemana.setDate(fimSemana.getDate() + 7);
+  const fimSemanaStr = dataLocalISO(fimSemana);
+
+  const grupos = {
+    hoje:       tarefas.filter(t => t.prazo === hojeStr),
+    atrasadas:  tarefas.filter(t => t.prazo && t.prazo < hojeStr),
+    semana:     tarefas.filter(t => t.prazo && t.prazo > hojeStr && t.prazo <= fimSemanaStr),
+    andamento:  tarefas.filter(t => t.status === 'em_andamento'),
+  };
+
+  // Atualiza os contadores das abas
+  const setCont = (id, n) => {
+    const el = document.getElementById(id);
+    if(el){ el.textContent = n; el.style.display = n > 0 ? '' : 'none'; }
+  };
+  setCont('contFocoHoje', grupos.hoje.length);
+  setCont('contFocoAtrasadas', grupos.atrasadas.length);
+  setCont('contFocoSemana', grupos.semana.length);
+  setCont('contFocoAndamento', grupos.andamento.length);
+
+  const vazios = {
+    hoje: 'Nenhuma tarefa com prazo pra hoje.',
+    atrasadas: 'Nenhuma tarefa atrasada.',
+    semana: 'Nada vencendo nos próximos 7 dias.',
+    andamento: 'Nenhuma tarefa em andamento agora.',
+  };
+
+  const lista = grupos[abaFocoAtual] || [];
   const cont = document.getElementById('tarefasHoje');
 
-  if(relevantes.length===0){
-    cont.innerHTML = '<p class="muted" style="padding:18px;">Nenhuma tarefa vencendo hoje.</p>';
+  if(lista.length === 0){
+    cont.innerHTML = `<p class="muted" style="padding:18px;">${vazios[abaFocoAtual]}</p>`;
     return;
   }
 
   const CORES_STATUS_LINHA = { pendente:'var(--clay)', em_andamento:'var(--terracotta)', concluida:'var(--sage)' };
-  cont.innerHTML = relevantes.map(t => {
-    const atrasada = t.prazo < hojeStr;
+  cont.innerHTML = lista.map(t => {
+    const atrasada = t.prazo && t.prazo < hojeStr;
+    const etiqueta = atrasada ? `<span class="etiqueta atrasada">${fmtDataBR(t.prazo)}</span>`
+      : t.status === 'em_andamento' ? '<span class="etiqueta rodando">em andamento</span>'
+      : t.prazo === hojeStr ? '<span class="etiqueta hoje">hoje</span>'
+      : t.prazo ? `<span class="etiqueta hoje">${fmtDataBR(t.prazo)}</span>` : '';
     return `<div class="linha-item" onclick="navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})">
       <span class="marca-status" style="background:${atrasada?'var(--alert)':(CORES_STATUS_LINHA[t.status]||'var(--terracotta)')};"></span>
       <div class="linha-txt">
         <p>${esc(t.titulo)}</p>
         <span>${esc(t.projetos?.nome||'')}</span>
       </div>
-      <span class="etiqueta ${atrasada?'atrasada':'hoje'}">${atrasada ? fmtDataBR(t.prazo) : 'hoje'}</span>
+      ${etiqueta}
     </div>`;
   }).join('');
 }
@@ -446,19 +511,36 @@ function iconePara(nome){
   return '';
 }
 
-function renderResumoProjetos(projetos, execucao){
+function renderResumoProjetos(projetos, execucao, todasEtapas, execEtapas){
   const execMap = new Map((execucao||[]).map(e => [e.projeto_id, e]));
+  const execEtapaMap = new Map((execEtapas||[]).map(e => [e.etapa_id, e.percentual_execucao]));
   const cont = document.getElementById('resumoProjetos');
   if(projetos.length===0){ cont.innerHTML = '<p class="muted">Nenhum projeto em andamento no momento.</p>'; return; }
+
   cont.innerHTML = projetos.map(p => {
     const ex = execMap.get(p.id) || { percentual_execucao:0 };
     const nomeCliente = p.clientes?.nome_completo || p.cliente || '';
+    const etapasDoProjeto = (todasEtapas||[])
+      .filter(e => e.projeto_id === p.id)
+      .sort((a,b) => (a.ordem||0) - (b.ordem||0));
+
     return `<div class="card proj-card proj-card-mini" onclick="navigate('projeto-detalhe',{projetoId:'${p.id}'})">
       <div class="proj-thumb" style="${p.capa_url ? `background-image:url('${esc(p.capa_url)}');` : ''}">${p.capa_url ? '' : ''}</div>
       <p class="proj-title" style="font-size:13.5px;margin:10px 0 1px;">${esc(p.nome)}</p>
       ${nomeCliente ? `<p class="proj-client" style="font-size:12px;margin-bottom:8px;">${esc(nomeCliente)}</p>` : ''}
       <div class="bar"><div style="width:${ex.percentual_execucao}%"></div></div>
       <p class="barcaption">${ex.percentual_execucao}% concluído</p>
+      ${etapasDoProjeto.length > 0 ? `
+        <div class="etapas-mini">
+          ${etapasDoProjeto.slice(0,6).map(e => {
+            const pct = execEtapaMap.get(e.id) || 0;
+            const cor = pct === 100 ? 'var(--sage)' : pct > 0 ? 'var(--terracotta)' : 'var(--line)';
+            return `<div class="etapa-mini" title="${esc(e.nome)}: ${pct}%">
+              <span class="etapa-mini-nome">${esc(e.nome)}</span>
+              <span class="etapa-mini-pct" style="color:${pct>0?cor:'var(--graphite)'};">${pct}%</span>
+            </div>`;
+          }).join('')}
+        </div>` : ''}
     </div>`;
   }).join('');
 }
@@ -693,9 +775,12 @@ async function criarProjeto(e){
 
   if(data && modeloOrigemId){
     await duplicarEstruturaProjeto(modeloOrigemId, data.id);
+  } else if(data && templateEscolhido){
+    await aplicarTemplateFabrica(templateEscolhido, data.id);
   }
 
   e.target.reset();
+  limparTemplateEscolhido();
   toggleForm('formNovoProjeto', false);
   if(data) navigate('projeto-detalhe', { projetoId: data.id });
 }
@@ -1091,6 +1176,7 @@ async function adicionarEtapa(e){
     bloqueado_por: document.getElementById('etBloqueadaPor').value || null,
     resumo: document.getElementById('etResumo').value.trim() || null,
     tarefas_modelo: document.getElementById('etTarefasModelo').value.trim() || null,
+    horas_projetadas: document.getElementById('etHorasProjetadas').value.trim() ? parseValorBR(document.getElementById('etHorasProjetadas').value) : null,
   });
   if(checarErro(resultado, 'adicionar etapa')) return;
   e.target.reset();
@@ -1801,6 +1887,7 @@ let periodoFinanceiroAtual = 'mes';
 let abaFinanceiraAtual = 'visao';
 
 function trocarAbaFinanceiro(tab){
+  marcarSubmenuAtivo('financeiro', tab);
   abaFinanceiraAtual = tab;
   document.querySelectorAll('.fin-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'fintab-'+tab));
   document.querySelectorAll('.fin-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
@@ -1813,6 +1900,7 @@ function trocarAbaFinanceiro(tab){
 
 function mudarPeriodoFinanceiro(periodo){
   periodoFinanceiroAtual = periodo;
+  document.querySelectorAll('#filtroPeriodoFin button').forEach(b => b.classList.toggle('on', b.dataset.periodo===periodo));
   trocarAbaFinanceiro(abaFinanceiraAtual);
 }
 
@@ -1820,6 +1908,11 @@ function mudarPeriodoFinanceiro(periodo){
 function intervaloPeriodoFinanceiro(){
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const ano = hoje.getFullYear(), mes = hoje.getMonth();
+  if(periodoFinanceiroAtual === 'semana'){
+    const inicioSemana = new Date(hoje); inicioSemana.setDate(hoje.getDate() - hoje.getDay());
+    const fimSemana = new Date(inicioSemana); fimSemana.setDate(inicioSemana.getDate() + 6);
+    return { de: dataLocalISO(inicioSemana), ate: dataLocalISO(fimSemana) };
+  }
   if(periodoFinanceiroAtual === 'mes')
     return { de: dataLocalISO(new Date(ano, mes, 1)), ate: dataLocalISO(new Date(ano, mes+1, 0)) };
   if(periodoFinanceiroAtual === 'mes_passado')
@@ -3146,6 +3239,8 @@ async function abrirModalEditarEtapa(etapaId){
         <option value="">Não depende de outra etapa</option>
         ${(etapasProjeto||[]).filter(e=>e.id!==etapaId).map(e => `<option value="${e.id}" ${e.id===etapa.bloqueado_por?'selected':''}>${esc(e.nome)}</option>`).join('')}
       </select>
+      <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Horas estimadas</label>
+      <input id="edEtHorasProjetadas" value="${etapa.horas_projetadas || ''}" placeholder="ex: 32" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
       <textarea id="edEtResumo" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:16px;">${esc(etapa.resumo||'')}</textarea>
       <div class="form-actions">
         <button type="submit" class="btn">Salvar</button>
@@ -3165,6 +3260,7 @@ async function salvarEdicaoEtapa(e, etapaId){
     prioridade: document.getElementById('edEtPrioridade').value,
     bloqueado_por: document.getElementById('edEtBloqueadaPor').value || null,
     resumo: document.getElementById('edEtResumo').value.trim() || null,
+    horas_projetadas: document.getElementById('edEtHorasProjetadas').value.trim() ? parseValorBR(document.getElementById('edEtHorasProjetadas').value) : null,
   }).eq('id', etapaId);
   if(checarErro(resultado, 'editar etapa')) return;
   fecharModalEditar();
@@ -5212,6 +5308,7 @@ async function exportarBackup(){
 
 /* ================= ROTEIROS DE VÍDEO (Conteúdo) ================= */
 function trocarAbaConteudo(tab){
+  marcarSubmenuAtivo('conteudo', tab);
   document.querySelectorAll('.ct-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'cttab-'+tab));
   document.querySelectorAll('.ct-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
   if(tab==='planner') loadConteudo();
@@ -5596,7 +5693,7 @@ async function loadProdutividadeProjeto(){
   const [{ data: tarefas }, { data: registros }, { data: etapas }, { data: ambientes }] = await Promise.all([
     sb.from('tarefas').select('id,titulo,status,etapa_id,ambiente_id').eq('projeto_id', projetoAtualId),
     sb.from('tarefas_tempo').select('tarefa_id,equipe_id,duracao_segundos,equipe(nome)').not('duracao_segundos','is',null),
-    sb.from('etapas').select('id,nome').eq('projeto_id', projetoAtualId),
+    sb.from('etapas').select('id,nome,horas_projetadas').eq('projeto_id', projetoAtualId),
     sb.from('ambientes').select('id,nome').eq('projeto_id', projetoAtualId),
   ]);
 
@@ -5604,9 +5701,11 @@ async function loadProdutividadeProjeto(){
   const registrosDoProjeto = (registros||[]).filter(r => idsDoProjeto.has(r.tarefa_id));
 
   if(registrosDoProjeto.length === 0){
+    const projTotal = (etapas||[]).reduce((s,e) => s + Number(e.horas_projetadas||0), 0);
     cont.innerHTML = `<div class="card" style="max-width:560px;">
       <p class="label">Produtividade</p>
       <p class="muted" style="margin-top:0;">Nenhum tempo cronometrado nesse projeto ainda. Use o botão "▶ Iniciar" nas tarefas (aba Tarefas) pra começar a medir.</p>
+      ${projTotal > 0 ? `<p style="margin:10px 0 0;font-size:13.5px;">Já existem <b>${projTotal.toFixed(1).replace('.',',')}h</b> estimadas nas etapas desse projeto — assim que começar a cronometrar, o comparativo aparece aqui.</p>` : ''}
     </div>`;
     return;
   }
@@ -5645,7 +5744,70 @@ async function loadProdutividadeProjeto(){
   const tarefasComTempo = porTarefa.size;
   const totalTarefas = (tarefas||[]).length;
 
-  cont.innerHTML = `
+  /* Projetado x trabalhado: soma as horas estimadas das etapas e compara
+     com o que o cronômetro registrou. */
+  const horasProjetadasTotal = (etapas||[]).reduce((s,e) => s + Number(e.horas_projetadas||0), 0);
+  const horasTrabalhadas = totalSeg / 3600;
+  const pctConsumo = horasProjetadasTotal > 0 ? Math.round((horasTrabalhadas/horasProjetadasTotal)*100) : null;
+  const corConsumo = pctConsumo === null ? 'var(--graphite)'
+    : pctConsumo > 100 ? 'var(--alert)'
+    : pctConsumo >= 70 ? 'var(--clay)'
+    : 'var(--sage)';
+
+  // Projeção pelo ritmo: se X% das tarefas estão prontas e gastamos Y horas,
+  // no mesmo ritmo o projeto inteiro consumiria Y / (X/100) horas.
+  const concluidas = (tarefas||[]).filter(t => t.status==='concluida').length;
+  const pctConcluido = totalTarefas > 0 ? (concluidas/totalTarefas) : 0;
+  const projecaoFinal = (pctConcluido > 0.05 && horasTrabalhadas > 0) ? horasTrabalhadas / pctConcluido : null;
+  const vaiEstourar = projecaoFinal !== null && horasProjetadasTotal > 0 && projecaoFinal > horasProjetadasTotal;
+
+  const blocoComparativo = horasProjetadasTotal > 0 ? `
+    <div class="card" style="margin-bottom:24px;border-left:3px solid ${corConsumo};">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:14px;">
+        <div>
+          <p class="label" style="margin:0 0 4px;">Horas projetadas × trabalhadas</p>
+          <p class="muted" style="margin:0;font-size:12.5px;">Compara o que você estimou nas etapas com o que o cronômetro registrou.</p>
+        </div>
+        <div style="display:flex;gap:26px;">
+          <div><p class="label" style="margin:0;">Projetadas</p><p style="font-size:20px;font-weight:700;font-family:'Space Grotesk',sans-serif;margin:2px 0 0;">${horasProjetadasTotal.toFixed(1).replace('.',',')}h</p></div>
+          <div><p class="label" style="margin:0;">Trabalhadas</p><p style="font-size:20px;font-weight:700;font-family:'Space Grotesk',sans-serif;margin:2px 0 0;">${horasTrabalhadas.toFixed(1).replace('.',',')}h</p></div>
+          <div><p class="label" style="margin:0;">Consumo</p><p style="font-size:20px;font-weight:700;font-family:'Space Grotesk',sans-serif;color:${corConsumo};margin:2px 0 0;">${pctConsumo}%</p></div>
+        </div>
+      </div>
+      <div class="bar" style="height:8px;"><div style="width:${Math.min(100,pctConsumo)}%;background:${corConsumo};"></div></div>
+
+      ${vaiEstourar ? `
+        <div style="background:rgba(193,96,46,.10);border-radius:9px;padding:12px 14px;margin-top:14px;">
+          <p style="margin:0;font-size:13px;font-weight:600;color:var(--terracotta);">Ritmo aponta estouro de horas</p>
+          <p style="margin:3px 0 0;font-size:12.5px;color:var(--graphite);">No ritmo atual (${Math.round(pctConcluido*100)}% das tarefas concluídas), o projeto terminaria com cerca de ${projecaoFinal.toFixed(0)}h — acima das ${horasProjetadasTotal.toFixed(1).replace('.',',')}h estimadas.</p>
+        </div>` : ''}
+
+      <table style="margin-top:16px;">
+        <thead><tr><th>Etapa</th><th style="text-align:right;">Projetado</th><th style="text-align:right;">Trabalhado</th><th style="text-align:right;">Diferença</th><th style="width:70px;text-align:right;">Consumo</th></tr></thead>
+        <tbody>
+          ${(etapas||[]).filter(e => e.horas_projetadas).map(e => {
+            const trab = (porEtapa.get(e.nome)||0)/3600;
+            const proj = Number(e.horas_projetadas);
+            const pct = Math.round((trab/proj)*100);
+            const cor = pct > 100 ? 'var(--alert)' : pct >= 70 ? 'var(--clay)' : 'var(--sage)';
+            const dif = trab - proj;
+            return `<tr>
+              <td>${esc(e.nome)}</td>
+              <td style="text-align:right;font-family:'IBM Plex Mono',monospace;">${proj.toFixed(1).replace('.',',')}h</td>
+              <td style="text-align:right;font-family:'IBM Plex Mono',monospace;">${trab.toFixed(1).replace('.',',')}h</td>
+              <td style="text-align:right;font-family:'IBM Plex Mono',monospace;color:${dif>0?'var(--alert)':'var(--graphite)'};">${dif>0?'+':''}${dif.toFixed(1).replace('.',',')}h</td>
+              <td style="text-align:right;"><span class="pill" style="color:${cor};border-color:${cor};">${pct}%</span></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>` : `
+    <div class="card" style="margin-bottom:24px;">
+      <p class="label" style="margin:0 0 4px;">Horas projetadas × trabalhadas</p>
+      <p class="muted" style="margin:0;">Preencha "Horas estimadas" nas etapas (aba Etapas) pra ver aqui se o projeto está dentro do previsto.</p>
+    </div>`;
+
+  cont.innerHTML = blocoComparativo + `
     <div class="grid cards4" style="margin-bottom:24px;">
       <div class="card"><p class="label">Tempo total</p><p style="font-size:24px;font-weight:700;font-family:'Space Grotesk',sans-serif;color:var(--terracotta);">${fmtHoras(totalSeg)}</p></div>
       <div class="card"><p class="label">Tarefas cronometradas</p><p style="font-size:24px;font-weight:700;font-family:'Space Grotesk',sans-serif;">${tarefasComTempo}<span style="font-size:14px;font-weight:400;color:var(--graphite);"> de ${totalTarefas}</span></p></div>
@@ -6012,4 +6174,123 @@ async function loadFinanceiroPorProjeto(){
       <td style="color:${CORES.atrasado};">${fmtMoeda(l.custos)}</td>
       <td style="font-weight:600;color:${l.lucro>=0?CORES.pago:CORES.atrasado};">${fmtMoeda(l.lucro)}</td>
     </tr>`).join('');
+}
+
+/* ================= TEMPLATES DE FÁBRICA =================
+   Modelos prontos de estrutura de projeto. Ao criar um projeto a partir
+   de um deles, as etapas (e o checklist inicial de cada uma) já vêm montadas
+   — e podem ser editadas normalmente depois. */
+const TEMPLATES_FABRICA = {
+  interiores: {
+    nome: 'Interiores completo',
+    descricao: 'Residencial com projeto executivo',
+    etapas: [
+      { nome:'Briefing e levantamento', tarefas:['Reunião de briefing','Levantamento métrico no local','Registro fotográfico','Montar programa de necessidades'] },
+      { nome:'Estudo preliminar', tarefas:['Estudo de layout','Moodboard de referências','Apresentação ao cliente','Ajustes do layout'] },
+      { nome:'Anteprojeto e 3D', tarefas:['Modelagem 3D','Imagens realistas','Apresentação das imagens','Ajustes solicitados'] },
+      { nome:'Projeto executivo', tarefas:['Planta de layout','Planta de demolição e construção','Projeto de iluminação','Planta de forro','Detalhamento de marcenaria','Detalhamento de marmoraria','Paginação de revestimentos','Projeto de pintura','Memorial descritivo'] },
+      { nome:'Acompanhamento', tarefas:['Visita técnica de obra','Alinhamento com fornecedores','Visita de ambientação e fotografia'] },
+    ],
+  },
+  reforma: {
+    nome: 'Reforma',
+    descricao: 'Reforma com demolição',
+    etapas: [
+      { nome:'Briefing e levantamento', tarefas:['Reunião de briefing','Levantamento do existente','Registro fotográfico','Checar viabilidade estrutural'] },
+      { nome:'Planta de demolição', tarefas:['Planta do existente','Planta de demolição','Planta de construção','Validar com engenheiro'] },
+      { nome:'Estudo preliminar', tarefas:['Estudo de layout','Moodboard','Apresentação ao cliente','Ajustes'] },
+      { nome:'Projeto executivo', tarefas:['Planta de layout','Projeto de iluminação','Planta de forro','Detalhamento de marcenaria','Paginação de revestimentos','Projeto de pintura','Planta de pontos elétricos e hidráulicos'] },
+      { nome:'Acompanhamento de obra', tarefas:['Visita de início de obra','Acompanhamento de marcenaria','Visita de vistoria final','Ambientação e fotografia'] },
+    ],
+  },
+  comercial: {
+    nome: 'Comercial',
+    descricao: 'Loja, clínica, escritório',
+    etapas: [
+      { nome:'Briefing comercial', tarefas:['Reunião de briefing','Entender operação e fluxo','Levantamento no local','Checar normas e acessibilidade'] },
+      { nome:'Estudo de layout e fluxo', tarefas:['Estudo de layout','Estudo de fluxo de clientes','Moodboard e conceito','Apresentação ao cliente'] },
+      { nome:'Anteprojeto e 3D', tarefas:['Modelagem 3D','Imagens realistas','Apresentação','Ajustes'] },
+      { nome:'Projeto executivo', tarefas:['Planta de layout','Projeto de iluminação','Planta de forro','Detalhamento de marcenaria','Paginação de revestimentos','Projeto de pintura','Detalhamento de balcões e vitrines'] },
+      { nome:'Comunicação visual', tarefas:['Projeto de fachada','Sinalização interna','Detalhamento de letreiro','Orçamento com fornecedor'] },
+    ],
+  },
+  ambiente: {
+    nome: 'Ambiente único',
+    descricao: 'Cozinha, closet, banheiro',
+    etapas: [
+      { nome:'Briefing do ambiente', tarefas:['Reunião de briefing','Medição do ambiente','Registro fotográfico'] },
+      { nome:'Estudo e 3D', tarefas:['Estudo de layout','Modelagem 3D','Apresentação ao cliente','Ajustes'] },
+      { nome:'Detalhamento de marcenaria', tarefas:['Vistas e cortes','Detalhamento de ferragens','Especificação de materiais','Envio ao marceneiro'] },
+      { nome:'Entrega', tarefas:['Conferência do projeto','Entrega dos arquivos','Termo de finalização'] },
+    ],
+  },
+};
+
+function abrirEscolhaTemplate(){
+  abrirModal(`
+    <p class="label" style="margin-bottom:6px;">Começar a partir de um modelo</p>
+    <p class="muted" style="margin-top:0;margin-bottom:16px;">Escolha um modelo e o projeto já nasce com as etapas e o checklist montados. Dá pra editar tudo depois.</p>
+    <div class="tpl-grid">
+      ${Object.entries(TEMPLATES_FABRICA).map(([chave, t]) => `
+        <div class="tpl-card" onclick="selecionarTemplate('${chave}')">
+          <h3>${esc(t.nome)}</h3>
+          <p>${esc(t.descricao)}</p>
+          <ol>${t.etapas.map(e => `<li>${esc(e.nome)}</li>`).join('')}</ol>
+          <p class="tpl-rodape">${t.etapas.length} etapas · ${t.etapas.reduce((s,e)=>s+e.tarefas.length,0)} tarefas</p>
+        </div>`).join('')}
+    </div>
+    <div class="form-actions" style="margin-top:18px;">
+      <button class="btn-ghost" onclick="limparTemplateEscolhido()">Começar do zero</button>
+      <button class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+    </div>
+  `);
+}
+
+let templateEscolhido = null;
+
+function selecionarTemplate(chave){
+  templateEscolhido = chave;
+  const t = TEMPLATES_FABRICA[chave];
+  document.getElementById('npTemplateEscolhido').textContent = `Modelo: ${t.nome}`;
+  document.getElementById('npTemplateEscolhido').style.display = '';
+  document.getElementById('npModelo').value = '';
+  fecharModalEditar();
+}
+
+function limparTemplateEscolhido(){
+  templateEscolhido = null;
+  const el = document.getElementById('npTemplateEscolhido');
+  if(el){ el.textContent = ''; el.style.display = 'none'; }
+  if(!document.getElementById('modalEditar').classList.contains('hidden')) fecharModalEditar();
+}
+
+/* Cria as etapas e tarefas do template dentro do projeto recém-criado */
+async function aplicarTemplateFabrica(chave, projetoId){
+  const t = TEMPLATES_FABRICA[chave];
+  if(!t) return;
+
+  const linhasEtapas = t.etapas.map((e, i) => ({
+    projeto_id: projetoId,
+    nome: e.nome,
+    ordem: i,
+    status: i === 0 ? 'em_andamento' : 'pendente',
+  }));
+
+  const resultado = await sb.from('etapas').insert(linhasEtapas).select('id,nome');
+  if(checarErro(resultado, 'criar etapas do modelo')) return;
+
+  const mapaEtapa = new Map((resultado.data||[]).map(e => [e.nome, e.id]));
+  const linhasTarefas = [];
+  t.etapas.forEach(e => {
+    const etapaId = mapaEtapa.get(e.nome);
+    if(!etapaId) return;
+    e.tarefas.forEach((titulo, i) => {
+      linhasTarefas.push({ projeto_id: projetoId, etapa_id: etapaId, titulo, ordem_manual: (i+1)*100 });
+    });
+  });
+
+  if(linhasTarefas.length > 0){
+    const r = await sb.from('tarefas').insert(linhasTarefas);
+    checarErro(r, 'criar tarefas do modelo');
+  }
 }

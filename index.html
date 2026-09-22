@@ -49,11 +49,42 @@
       <img src="logo-sami.png" alt="SAMI Arquitetura e Interiores" class="sidebar-logo" />
       <div class="brand">SAMI · Gestão</div>
       <nav>
+        <p class="nav-grupo">Visão</p>
         <button class="navbtn" data-view="inicio" onclick="navigate('inicio')">Início</button>
-        <button class="navbtn" data-view="projetos" onclick="navigate('projetos')">Projetos</button>
+
+        <p class="nav-grupo">Gestão</p>
+        <button class="navbtn navbtn-pai" data-view="projetos" onclick="navigate('projetos')">
+          <span>Projetos</span><span class="nav-seta">›</span>
+        </button>
+        <div class="nav-sub" data-sub="projetos">
+          <button class="navbtn-sub" data-subaba="dashboard" onclick="navigate('projetos',{subaba:'dashboard'})">Dashboard</button>
+          <button class="navbtn-sub" data-subaba="tarefas" onclick="navigate('projetos',{subaba:'tarefas'})">Tarefas</button>
+          <button class="navbtn-sub" data-subaba="cronograma" onclick="navigate('projetos',{subaba:'cronograma'})">Cronograma</button>
+          <button class="navbtn-sub" data-subaba="orcamentos" onclick="navigate('projetos',{subaba:'orcamentos'})">Orçamentos</button>
+        </div>
+
+        <button class="navbtn navbtn-pai" data-view="financeiro" onclick="navigate('financeiro')">
+          <span>Financeiro</span><span class="nav-seta">›</span>
+        </button>
+        <div class="nav-sub" data-sub="financeiro">
+          <button class="navbtn-sub" data-subaba="visao" onclick="navigate('financeiro',{subaba:'visao'})">Visão geral</button>
+          <button class="navbtn-sub" data-subaba="receber" onclick="navigate('financeiro',{subaba:'receber'})">A receber</button>
+          <button class="navbtn-sub" data-subaba="comissoes" onclick="navigate('financeiro',{subaba:'comissoes'})">Comissões RT</button>
+          <button class="navbtn-sub" data-subaba="despesas" onclick="navigate('financeiro',{subaba:'despesas'})">Despesas</button>
+          <button class="navbtn-sub" data-subaba="projetos" onclick="navigate('financeiro',{subaba:'projetos'})">Por projeto</button>
+        </div>
+
         <button class="navbtn" data-view="clientes" onclick="navigate('clientes')">Clientes</button>
-        <button class="navbtn" data-view="conteudo" onclick="navigate('conteudo')">Conteúdo</button>
-        <button class="navbtn" data-view="financeiro" onclick="navigate('financeiro')">Financeiro</button>
+
+        <p class="nav-grupo">Escritório</p>
+        <button class="navbtn navbtn-pai" data-view="conteudo" onclick="navigate('conteudo')">
+          <span>Conteúdo</span><span class="nav-seta">›</span>
+        </button>
+        <div class="nav-sub" data-sub="conteudo">
+          <button class="navbtn-sub" data-subaba="planner" onclick="navigate('conteudo',{subaba:'planner'})">Planner</button>
+          <button class="navbtn-sub" data-subaba="roteiros" onclick="navigate('conteudo',{subaba:'roteiros'})">Roteiros de vídeo</button>
+          <button class="navbtn-sub" data-subaba="referencias" onclick="navigate('conteudo',{subaba:'referencias'})">Referências</button>
+        </div>
         <button class="navbtn" data-view="fornecedores" onclick="navigate('fornecedores')">Fornecedores</button>
         <button class="navbtn" data-view="equipe" onclick="navigate('equipe')">Equipe</button>
       </nav>
@@ -93,8 +124,14 @@
         <div>
           <div class="bloco">
             <div class="bloco-topo">
-              <h2>Tarefas de hoje</h2>
+              <h2>Meu foco hoje</h2>
               <button class="link-bloco" onclick="navigate('projetos',{subaba:'tarefas'})">abrir kanban</button>
+            </div>
+            <div class="chip-select" id="abasFoco" style="margin:0 0 10px;">
+              <button type="button" class="chip on" data-foco="hoje" onclick="trocarAbaFoco('hoje')">Hoje <span class="cont-foco" id="contFocoHoje">0</span></button>
+              <button type="button" class="chip" data-foco="atrasadas" onclick="trocarAbaFoco('atrasadas')">Atrasadas <span class="cont-foco" id="contFocoAtrasadas">0</span></button>
+              <button type="button" class="chip" data-foco="semana" onclick="trocarAbaFoco('semana')">Esta semana <span class="cont-foco" id="contFocoSemana">0</span></button>
+              <button type="button" class="chip" data-foco="andamento" onclick="trocarAbaFoco('andamento')">Em andamento <span class="cont-foco" id="contFocoAndamento">0</span></button>
             </div>
             <div class="card" id="tarefasHoje" style="padding:0;"></div>
           </div>
@@ -257,7 +294,11 @@
           <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Foto de capa (opcional)</label>
           <input id="npFoto" type="file" accept="image/*" style="margin-bottom:10px;" />
           <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Começar a partir de um modelo (opcional)</label>
-          <select id="npModelo"><option value="">Começar do zero</option></select>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+            <button type="button" class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12.5px;padding:8px 14px;" onclick="abrirEscolhaTemplate()">Escolher modelo pronto</button>
+            <span id="npTemplateEscolhido" class="badge clay" style="display:none;"></span>
+          </div>
+          <select id="npModelo" onchange="if(this.value) limparTemplateEscolhido()"><option value="">Ou começar de um projeto seu salvo como modelo</option></select>
           <div class="form-actions">
             <button type="submit" class="btn">Criar projeto</button>
             <button type="button" class="btn-ghost" onclick="toggleForm('formNovoProjeto', false)">Cancelar</button>
@@ -510,6 +551,7 @@
             </select>
           </div>
           <select id="etBloqueadaPor" style="width:100%;"><option value="">Não depende de outra etapa</option></select>
+          <input id="etHorasProjetadas" placeholder="Horas estimadas pra essa etapa (ex: 32)" title="Usado pra comparar com o tempo do cronômetro" />
           <textarea id="etResumo" placeholder="Resumo (opcional)" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
           <details style="margin-bottom:10px;">
             <summary class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);cursor:pointer;">Tarefas automáticas por dependência (avançado)</summary>
@@ -1013,13 +1055,13 @@
     <section id="view-financeiro" class="hidden">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
         <h1 style="margin:0;">Financeiro</h1>
-        <select id="filtroPeriodoFin" onchange="mudarPeriodoFinanceiro(this.value)" style="border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:13px;background:#fff;">
-          <option value="mes">Este mês</option>
-          <option value="mes_passado">Mês passado</option>
-          <option value="trimestre">Últimos 3 meses</option>
-          <option value="ano">Este ano</option>
-          <option value="tudo">Tudo</option>
-        </select>
+        <div class="filtro-periodo" id="filtroPeriodoFin">
+          <button type="button" data-periodo="semana" onclick="mudarPeriodoFinanceiro('semana')">Semana</button>
+          <button type="button" data-periodo="mes" class="on" onclick="mudarPeriodoFinanceiro('mes')">Mês</button>
+          <button type="button" data-periodo="trimestre" onclick="mudarPeriodoFinanceiro('trimestre')">Trimestre</button>
+          <button type="button" data-periodo="ano" onclick="mudarPeriodoFinanceiro('ano')">Ano</button>
+          <button type="button" data-periodo="tudo" onclick="mudarPeriodoFinanceiro('tudo')">Tudo</button>
+        </div>
       </div>
 
       <div class="chip-select" style="margin-bottom:24px;">
