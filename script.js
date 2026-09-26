@@ -849,6 +849,7 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
     totalPorEtapa.set(t.etapa_id, (totalPorEtapa.get(t.etapa_id)||0) + (t.duracao_segundos||0));
   });
   window._tempoTotalPorEtapa = totalPorEtapa;
+  window._equipeAtiva = equipe || []; // usado pelo cronômetro por etapa (quem pode "iniciar")
 
   document.getElementById('pdCliente').textContent = projeto.clientes?.nome_completo || projeto.cliente || '';
   document.getElementById('pdNome').textContent = projeto.nome;
