@@ -8,20 +8,20 @@ const SUPABASE_ANON_KEY = "sb_publishable_-hD_wTqLCMlLQct3DBTFZw_UvIvLHap";
 /* Opcional — cole aqui o e-mail da agenda do Google que você quer mostrar
    na tela Início (veja o passo a passo que te mandei pra pegar esse endereço).
    Deixe em branco ("") se não quiser usar isso. */
-const GOOGLE_CALENDAR_EMAIL = "samiarquitetura@gmail.com";
+let GOOGLE_CALENDAR_EMAIL = "samiarquitetura@gmail.com";
 
 /* Com quantos dias de antecedência avisar que uma tarefa está perto do prazo
    (além do aviso de "já venceu"). Mude esse número quando quiser. */
-const DIAS_ALERTA_PRAZO = 3;
+let DIAS_ALERTA_PRAZO = 3;
 
 /* Com quantos dias de antecedência destacar um aniversário chegando (de
    cliente ou da equipe) como "em breve" na tela Início. */
-const DIAS_ALERTA_ANIVERSARIO = 15;
+let DIAS_ALERTA_ANIVERSARIO = 15;
 
 /* Por quantos dias uma tarefa concluída continua aparecendo na coluna
    "Concluída" do kanban. Depois disso ela some da tela (mas continua
    guardada no banco e contando no relatório de produtividade). */
-const DIAS_MOSTRAR_CONCLUIDAS = 30;
+let DIAS_MOSTRAR_CONCLUIDAS = 30;
 /* ====================================================================== */
 
 let sb;
@@ -94,7 +94,7 @@ function cabecalhoDocumentoHTML(){
   return `<div style="display:flex;align-items:center;gap:12px;border-bottom:2px solid #C1602E;padding-bottom:14px;margin-bottom:26px;">
     <img src="${logoUrl}" style="width:46px;height:46px;object-fit:contain;" />
     <div>
-      <p style="margin:0;font-family:Georgia,serif;font-size:16px;font-weight:700;letter-spacing:.02em;">SAMI Arquitetura</p>
+      <p style="margin:0;font-family:Georgia,serif;font-size:16px;font-weight:700;letter-spacing:.02em;">${configSistema?.nome_escritorio || 'SAMI Arquitetura'}</p>
       <p style="margin:0;font-size:10.5px;color:#5C554C;letter-spacing:.04em;text-transform:uppercase;">Arquitetura & Interiores</p>
     </div>
   </div>`;
@@ -143,9 +143,10 @@ async function handleLogout(){
   showLogin();
 }
 
-function showApp(){
+async function showApp(){
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('appScreen').style.display = 'flex';
+  await carregarConfigSistema();
   navigate('inicio');
   // Cria as tarefas das rotinas que estão na hora (silencioso, não trava a tela)
   gerarTarefasRecorrentes().catch(e => console.warn('rotinas:', e));
@@ -157,14 +158,14 @@ function showLogin(){
 }
 
 /* ---------------- NAVEGAÇÃO ---------------- */
-const VIEWS = ['inicio','projetos','projeto-detalhe','clientes','cliente-detalhe','conteudo','financeiro','fornecedores','equipe'];
+const VIEWS = ['inicio','projetos','projeto-detalhe','clientes','cliente-detalhe','propostas','proposta-detalhe','conteudo','financeiro','fornecedores','equipe','config'];
 function navigate(view, opts){
   opts = opts || {};
   VIEWS.forEach(v => document.getElementById('view-'+v).classList.toggle('hidden', v!==view));
   document.querySelectorAll('.navbtn').forEach(b => b.classList.toggle('active', b.dataset.view===view));
 
   // "projeto-detalhe" e "cliente-detalhe" mantêm o módulo pai marcado no menu
-  const viewMenu = view==='projeto-detalhe' ? 'projetos' : view==='cliente-detalhe' ? 'clientes' : view;
+  const viewMenu = view==='projeto-detalhe' ? 'projetos' : view==='cliente-detalhe' ? 'clientes' : view==='proposta-detalhe' ? 'propostas' : view;
   document.querySelectorAll('.navbtn-pai').forEach(b => b.classList.toggle('on', b.dataset.view===viewMenu));
   document.querySelectorAll('.nav-sub').forEach(el => el.classList.toggle('aberto', el.dataset.sub===viewMenu));
 
@@ -174,12 +175,15 @@ function navigate(view, opts){
   if(view==='inicio') loadInicio();
   if(view==='projetos') trocarAbaProjetosModulo(subaba);
   if(view==='clientes') loadClientes();
+  if(view==='propostas') loadPropostas();
   if(view==='conteudo') trocarAbaConteudo(subaba);
   if(view==='financeiro') trocarAbaFinanceiro(subaba);
   if(view==='fornecedores') loadFornecedores();
   if(view==='equipe') loadEquipe();
+  if(view==='config'){ loadConfiguracoes(); loadConfigPropostas(); }
   if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId, opts.aba);
   if(view==='cliente-detalhe' && opts.clienteId) loadClienteDetalhe(opts.clienteId);
+  if(view==='proposta-detalhe' && opts.propostaId) loadPropostaDetalhe(opts.propostaId);
 
   marcarSubmenuAtivo(viewMenu, subaba);
   fecharMenuMobile();
@@ -365,6 +369,7 @@ async function loadInicio(){
   renderResumoProjetos(projetos||[], execucao||[], todasEtapasInicio||[], execEtapasInicio||[]);
   renderLinksRapidos(linksRede||[], linksConhecimento||[]);
   renderTarefasHoje(tarefasHoje||[]);
+  renderTarefasEscritorio(tarefasHoje||[]);
   renderRecados(recados||[]);
   renderGoogleAgenda();
   await renderResumoEIndicadores(tarefasHoje||[], compromissos||[]);
@@ -434,6 +439,8 @@ function trocarAbaFoco(aba){
 }
 
 function renderTarefasHoje(tarefas){
+  // As do escritório aparecem no bloco próprio, pra não duplicar
+  tarefas = (tarefas||[]).filter(t => t.projeto_id);
   window._tarefasFoco = tarefas;
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const hojeStr = dataLocalISO(hoje);
@@ -814,7 +821,8 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
   const [
     { data: projeto }, { data: etapas }, { data: tarefas }, { data: parcelas },
     { data: responsaveis }, { data: equipe }, { data: visitas }, { data: relatorios }, { data: execEtapas },
-    { data: ambientes }, { data: rentabilidade }
+    { data: ambientes }, { data: rentabilidade },
+    { data: temposEtapaAbertos }, { data: temposEtapaFechados }, { data: execucaoProjeto }
   ] = await Promise.all([
     sb.from('projetos').select('*, clientes(nome_completo)').eq('id', projetoId).single(),
     sb.from('etapas').select('*').eq('projeto_id', projetoId).order('ordem'),
@@ -827,14 +835,27 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
     sb.from('v_etapas_execucao').select('etapa_id,percentual_execucao,total_tarefas'),
     sb.from('ambientes').select('*').eq('projeto_id', projetoId).order('ordem'),
     sb.from('v_rentabilidade_projeto').select('*').eq('projeto_id', projetoId).maybeSingle(),
+    sb.from('tarefas_tempo').select('id,etapa_id,equipe_id,inicio,equipe(nome)').not('etapa_id','is',null).is('fim', null),
+    sb.from('tarefas_tempo').select('etapa_id,duracao_segundos').not('etapa_id','is',null).not('duracao_segundos','is',null),
+    sb.from('v_projetos_execucao').select('percentual_execucao,total_tarefas').eq('projeto_id', projetoId).maybeSingle(),
   ]);
   if(!projeto) { navigate('projetos'); return; }
   dadosProjetoAtual = projeto;
+
+  // Cronômetros de etapa: os que estão rodando agora e o total já registrado
+  window._temposEtapaAbertos = temposEtapaAbertos || [];
+  const totalPorEtapa = new Map();
+  (temposEtapaFechados||[]).forEach(t => {
+    totalPorEtapa.set(t.etapa_id, (totalPorEtapa.get(t.etapa_id)||0) + (t.duracao_segundos||0));
+  });
+  window._tempoTotalPorEtapa = totalPorEtapa;
 
   document.getElementById('pdCliente').textContent = projeto.clientes?.nome_completo || projeto.cliente || '';
   document.getElementById('pdNome').textContent = projeto.nome;
   document.getElementById('pdStatus').innerHTML = Object.entries(STATUS_PROJETO_LABEL)
     .map(([v,l]) => `<option value="${v}" ${v===projeto.status?'selected':''}>${l}</option>`).join('');
+
+  atualizarAvisoProjetoPronto(projeto, execucaoProjeto);
 
   const respPorTarefa = new Map();
   (responsaveis||[]).forEach(r => {
@@ -939,6 +960,8 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
           ${bloqueio ? `<span class="badge alert">Depende de: ${esc(bloqueio)}</span>` : ''}
         </div>
         ${et.resumo ? `<p style="font-size:12.5px;color:var(--graphite);margin:0 0 8px;">${esc(et.resumo)}</p>` : ''}
+
+        ${renderCronometroEtapa(et)}
 
         <div style="border-top:1px solid var(--line);padding-top:10px;margin-top:4px;">
           <p class="mono" style="font-size:11.5px;text-transform:uppercase;color:var(--graphite);margin:0 0 8px;">Checklist</p>
@@ -1609,6 +1632,7 @@ function tarefasFiltradas(){
     }
     if(filtroTarefaAtual==='todas') return true;
     if(filtroTarefaAtual==='atrasada') return atrasada;
+    if(filtroTarefaAtual==='escritorio') return !t.projeto_id;
     return t.status===filtroTarefaAtual;
   });
 }
@@ -1640,7 +1664,9 @@ function renderKanbanTarefas(){
         const resp = respPorTarefa.get(t.id) || [];
         const tempoAberto = tempoAbertoPorTarefa.get(t.id);
         return `<div class="task-card${atrasada?' atrasada':''}" draggable="true" data-tarefa-id="${t.id}" ondragstart="dragStartTarefa(event,'${t.id}')" ondragend="dragEndTarefa(event)">
-          <p class="label" style="margin-bottom:2px;"><a href="#" onclick="event.preventDefault();navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--terracotta);">${esc(t.projetos?.nome||'')}</a>${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p>
+          <p class="label" style="margin-bottom:2px;">${t.projeto_id
+            ? `<a href="#" onclick="event.preventDefault();navigate('projeto-detalhe',{projetoId:'${t.projeto_id}'})" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--terracotta);">${esc(t.projetos?.nome||'')}</a>`
+            : '<span style="color:var(--clay);">Escritório</span>'}${t.ambientes?.nome ? ` · ${esc(t.ambientes.nome)}` : ''}</p>
           <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;">
             <p class="task-title">${esc(t.titulo)}</p>
             <div style="display:flex;gap:8px;flex-shrink:0;">
@@ -1654,7 +1680,7 @@ function renderKanbanTarefas(){
             ${resp.map(n => `<span class="badge line">${esc(n)}</span>`).join('')}
           </div>
           ${(t.data_inicio || t.prazo) ? `<p style="font-size:12px;margin:0 0 8px;color:${atrasada?'var(--alert)':'var(--graphite)'};">${t.data_inicio?`Início: ${fmtDataBR(t.data_inicio)}`:''}${t.data_inicio&&t.prazo?' · ':''}${t.prazo?`Prazo: ${fmtDataBR(t.prazo)}${t.prazo_herdado?' <span style="opacity:.7;font-size:11px;">(da etapa)</span>':''}`:''}</p>` : ''}
-          ${tempoAberto
+          ${(!cronometroPorTarefaAtivo() && !tempoAberto) ? '' : tempoAberto
             ? `<div class="timer-box running">
                 <p class="timer-box-label"><span class="timer-dot"></span>Cronômetro rodando</p>
                 <div class="timer-running-info">
@@ -1675,7 +1701,7 @@ function renderKanbanTarefas(){
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             ${(window._tempoTotalPorTarefa?.get(t.id) || 0) > 0
               ? `<span class="mono" style="font-size:11.5px;color:var(--terracotta);font-weight:500;">⏱ ${fmtHoras(window._tempoTotalPorTarefa.get(t.id))} no total</span>`
-              : `<span class="mono" style="font-size:11.5px;color:var(--graphite);opacity:.6;">sem tempo registrado</span>`}
+              : cronometroPorTarefaAtivo() ? `<span class="mono" style="font-size:11.5px;color:var(--graphite);opacity:.6;">sem tempo registrado</span>` : '<span></span>'}
             <button class="btn-ghost" style="font-size:11.5px;padding:0;" onclick="trazerTarefaParaTopo('${t.id}')">▲ pro topo</button>
           </div>
           <div class="move-row">
@@ -1820,9 +1846,9 @@ async function criarTarefaGlobal(e){
   e.preventDefault();
   const titulo = document.getElementById('ntTitulo').value.trim();
   const projetoId = document.getElementById('ntProjeto').value;
-  if(!titulo || !projetoId) return;
+  if(!titulo) return;
   const { data: tarefa } = await sb.from('tarefas').insert({
-    titulo, projeto_id: projetoId,
+    titulo, projeto_id: projetoId || null,
     prazo: document.getElementById('ntPrazo').value || null,
     data_inicio: document.getElementById('ntDataInicio').value || null,
     terceirizado: document.getElementById('ntTerceirizado').checked,
@@ -4810,7 +4836,7 @@ async function loadContrato(){
     document.getElementById('ctPrazoEP').value = ultimo.prazo_ep || 14;
     document.getElementById('ctPrazoAP').value = ultimo.prazo_ap || 25;
     document.getElementById('ctPrazoPE').value = ultimo.prazo_pe || 30;
-    document.getElementById('ctCidadeForo').value = ultimo.cidade_foro || 'Jundiaí';
+    document.getElementById('ctCidadeForo').value = ultimo.cidade_foro || configSistema?.cidade_padrao || 'Jundiaí';
     document.getElementById('ctDataContrato').value = dataLocalISO();
   }
 
@@ -5163,7 +5189,8 @@ function confirmarGeradorTermoAnteprojeto(){
   const data = document.getElementById('gtDataContrato').value;
   const nome = document.getElementById('gtClienteNome').value.trim();
   const cpf = document.getElementById('gtClienteCpf').value.trim();
-  const valorHT = document.getElementById('gtValorHT').value.trim() || '150,00';
+  const valorHT = document.getElementById('gtValorHT').value.trim()
+    || (configSistema?.valor_hora_tecnica ? String(configSistema.valor_hora_tecnica).replace('.', ',') : '150,00');
 
   const texto = `Conforme o Contrato nº ${numero || '____'}, firmado em ${dataContratoExtenso(data)}, e considerando as demais solicitações e definições previamente aprovadas, as partes, Sra./Sr. ${nome}${cpf?` CPF: ${cpf}`:''}, doravante denominada CONTRATANTE, e SAMI Arquitetura e Interiores, doravante denominada CONTRATADA, declaram e concordam que a etapa de Anteprojeto foi concluída e devidamente aprovada pela CONTRATANTE, estando o projeto apto a avançar para a etapa de detalhamento do Projeto Executivo, conforme as condições estabelecidas neste termo.
 
@@ -5513,8 +5540,8 @@ async function abrirRotinas(){
 
     <form onsubmit="criarRotina(event)" style="background:var(--paper);border-radius:10px;padding:12px;margin-bottom:16px;">
       <input id="roTitulo" required placeholder="O que se repete (ex: Revisar prazos da semana)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:8px;" />
-      <select id="roProjeto" required style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:8px;">
-        <option value="">Escolha o projeto onde a tarefa será criada</option>
+      <select id="roProjeto" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:8px;">
+        <option value="">Tarefa do escritório (sem projeto)</option>
         ${(projetos||[]).map(p => `<option value="${p.id}">${esc(p.nome)}</option>`).join('')}
       </select>
       <div style="display:flex;gap:8px;margin-bottom:10px;">
@@ -5537,7 +5564,7 @@ async function abrirRotinas(){
             <div>
               <p style="margin:0;font-size:13.5px;${r.ativa?'':'opacity:.5;text-decoration:line-through;'}">${esc(r.titulo)}</p>
               <p style="margin:2px 0 0;font-size:12px;color:var(--graphite);">
-                ${FREQUENCIA_LABEL[r.frequencia]}${r.frequencia==='semanal'||r.frequencia==='quinzenal' ? ` · ${DIAS_SEMANA[r.dia_semana||1]}` : ''}${r.frequencia==='mensal' ? ` · dia ${r.dia_mes||1}` : ''}${r.projetos?.nome ? ` · ${esc(r.projetos.nome)}` : ''}
+                ${FREQUENCIA_LABEL[r.frequencia]}${r.frequencia==='semanal'||r.frequencia==='quinzenal' ? ` · ${DIAS_SEMANA[r.dia_semana||1]}` : ''}${r.frequencia==='mensal' ? ` · dia ${r.dia_mes||1}` : ''}${r.projetos?.nome ? ` · ${esc(r.projetos.nome)}` : ' · Escritório'}
               </p>
             </div>
             <span style="display:flex;gap:10px;">
@@ -5609,8 +5636,8 @@ async function gerarTarefasRecorrentes(){
     else if(r.frequencia === 'quinzenal') deveCriar = hoje.getDay() === (r.dia_semana ?? 1) && diasDesdeUltima >= 14;
     else if(r.frequencia === 'mensal') deveCriar = hoje.getDate() === (r.dia_mes ?? 1) && diasDesdeUltima >= 28;
 
-    if(deveCriar && r.projeto_id){
-      novas.push({ projeto_id: r.projeto_id, titulo: r.titulo, prazo: hojeStr });
+    if(deveCriar){
+      novas.push({ projeto_id: r.projeto_id || null, titulo: r.titulo, prazo: hojeStr });
       idsGerados.push(r.id);
     }
   }
@@ -5692,13 +5719,17 @@ async function loadProdutividadeProjeto(){
 
   const [{ data: tarefas }, { data: registros }, { data: etapas }, { data: ambientes }] = await Promise.all([
     sb.from('tarefas').select('id,titulo,status,etapa_id,ambiente_id').eq('projeto_id', projetoAtualId),
-    sb.from('tarefas_tempo').select('tarefa_id,equipe_id,duracao_segundos,equipe(nome)').not('duracao_segundos','is',null),
+    sb.from('tarefas_tempo').select('tarefa_id,etapa_id,equipe_id,duracao_segundos,equipe(nome)').not('duracao_segundos','is',null),
     sb.from('etapas').select('id,nome,horas_projetadas').eq('projeto_id', projetoAtualId),
     sb.from('ambientes').select('id,nome').eq('projeto_id', projetoAtualId),
   ]);
 
   const idsDoProjeto = new Set((tarefas||[]).map(t => t.id));
-  const registrosDoProjeto = (registros||[]).filter(r => idsDoProjeto.has(r.tarefa_id));
+  const idsEtapas = new Set((etapas||[]).map(e => e.id));
+  // Entram os registros feitos na tarefa e também os feitos direto na etapa
+  const registrosDoProjeto = (registros||[]).filter(r =>
+    (r.tarefa_id && idsDoProjeto.has(r.tarefa_id)) || (r.etapa_id && idsEtapas.has(r.etapa_id))
+  );
 
   if(registrosDoProjeto.length === 0){
     const projTotal = (etapas||[]).reduce((s,e) => s + Number(e.horas_projetadas||0), 0);
@@ -5724,10 +5755,18 @@ async function loadProdutividadeProjeto(){
 
   registrosDoProjeto.forEach(r => {
     const seg = r.duracao_segundos || 0;
-    const t = mapaTarefa.get(r.tarefa_id);
-    porTarefa.set(r.tarefa_id, (porTarefa.get(r.tarefa_id)||0) + seg);
+    const t = r.tarefa_id ? mapaTarefa.get(r.tarefa_id) : null;
     const nomePessoa = r.equipe?.nome || 'Sem responsável';
     porPessoa.set(nomePessoa, (porPessoa.get(nomePessoa)||0) + seg);
+
+    if(r.etapa_id && !r.tarefa_id){
+      // registro feito direto na etapa
+      const nomeEtapa = mapaEtapa.get(r.etapa_id) || 'Etapa removida';
+      porEtapa.set(nomeEtapa, (porEtapa.get(nomeEtapa)||0) + seg);
+      return;
+    }
+
+    porTarefa.set(r.tarefa_id, (porTarefa.get(r.tarefa_id)||0) + seg);
     if(t){
       const nomeEtapa = t.etapa_id ? (mapaEtapa.get(t.etapa_id) || 'Etapa removida') : 'Sem etapa';
       porEtapa.set(nomeEtapa, (porEtapa.get(nomeEtapa)||0) + seg);
@@ -5740,8 +5779,8 @@ async function loadProdutividadeProjeto(){
     .map(([id, seg]) => ({ titulo: mapaTarefa.get(id)?.titulo || '(tarefa removida)', seg, status: mapaTarefa.get(id)?.status }))
     .sort((a,b) => b.seg - a.seg);
 
-  const mediaSeg = Math.round(totalSeg / porTarefa.size);
   const tarefasComTempo = porTarefa.size;
+  const mediaSeg = tarefasComTempo > 0 ? Math.round([...porTarefa.values()].reduce((a,b)=>a+b,0) / tarefasComTempo) : 0;
   const totalTarefas = (tarefas||[]).length;
 
   /* Projetado x trabalhado: soma as horas estimadas das etapas e compara
@@ -5812,7 +5851,7 @@ async function loadProdutividadeProjeto(){
       <div class="card"><p class="label">Tempo total</p><p style="font-size:24px;font-weight:700;font-family:'Space Grotesk',sans-serif;color:var(--terracotta);">${fmtHoras(totalSeg)}</p></div>
       <div class="card"><p class="label">Tarefas cronometradas</p><p style="font-size:24px;font-weight:700;font-family:'Space Grotesk',sans-serif;">${tarefasComTempo}<span style="font-size:14px;font-weight:400;color:var(--graphite);"> de ${totalTarefas}</span></p></div>
       <div class="card"><p class="label">Média por tarefa</p><p style="font-size:24px;font-weight:700;font-family:'Space Grotesk',sans-serif;">${fmtHoras(mediaSeg)}</p></div>
-      <div class="card"><p class="label">Mais demorada</p><p style="font-size:15px;font-weight:600;margin-top:6px;">${esc(tarefasOrdenadas[0].titulo)}</p><p class="mono" style="font-size:12px;color:var(--terracotta);margin:2px 0 0;">${fmtHoras(tarefasOrdenadas[0].seg)}</p></div>
+      <div class="card"><p class="label">Mais demorada</p>${tarefasOrdenadas.length > 0 ? `<p style="font-size:15px;font-weight:600;margin-top:6px;">${esc(tarefasOrdenadas[0].titulo)}</p><p class="mono" style="font-size:12px;color:var(--terracotta);margin:2px 0 0;">${fmtHoras(tarefasOrdenadas[0].seg)}</p>` : '<p class="muted" style="margin-top:6px;font-size:13px;">Tempo medido por etapa</p>'}</div>
     </div>
 
     <div class="grid" style="grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
@@ -5832,6 +5871,7 @@ async function loadProdutividadeProjeto(){
       <canvas id="chartProdAmbiente" height="150"></canvas>
     </div>` : ''}
 
+    ${tarefasOrdenadas.length === 0 ? '' : `
     <p class="label" style="margin-bottom:10px;">Tempo por tarefa</p>
     <div class="card" style="padding:0;">
       <table>
@@ -5851,7 +5891,7 @@ async function loadProdutividadeProjeto(){
           }).join('')}
         </tbody>
       </table>
-    </div>`;
+    </div>`}`;
 
   const CORES_GRAF = ['#C1602E','#5C6E5A','#9C6B4F','#3E4A3E','#8B3A2B','#7A5C8E','#4A7A8C','#B08968'];
   const emHoras = m => [...m.values()].map(s => Math.round((s/3600)*10)/10);
@@ -6293,4 +6333,684 @@ async function aplicarTemplateFabrica(chave, projetoId){
     const r = await sb.from('tarefas').insert(linhasTarefas);
     checarErro(r, 'criar tarefas do modelo');
   }
+}
+
+/* ================= CONFIGURAÇÕES DO SISTEMA ================= */
+let configSistema = null;
+
+/* Lê as configurações do banco e aplica nas variáveis que o sistema usa.
+   Chamado uma vez ao abrir o sistema. */
+async function carregarConfigSistema(){
+  const { data, error } = await sb.from('config_sistema').select('*').eq('id', 1).maybeSingle();
+  if(error || !data) return;   // sem config salva, seguem os valores padrão
+  configSistema = data;
+
+  DIAS_ALERTA_PRAZO = data.dias_alerta_prazo ?? DIAS_ALERTA_PRAZO;
+  DIAS_ALERTA_ANIVERSARIO = data.dias_alerta_aniversario ?? DIAS_ALERTA_ANIVERSARIO;
+  DIAS_MOSTRAR_CONCLUIDAS = data.dias_mostrar_concluidas ?? DIAS_MOSTRAR_CONCLUIDAS;
+  if(data.google_calendar_email) GOOGLE_CALENDAR_EMAIL = data.google_calendar_email;
+}
+
+function cronometroPorTarefaAtivo(){
+  return configSistema ? !!configSistema.cronometro_por_tarefa : false;
+}
+
+async function loadConfiguracoes(){
+  const { data } = await sb.from('config_sistema').select('*').eq('id', 1).maybeSingle();
+  const c = data || {};
+  document.getElementById('cfCronometroTarefa').checked = !!c.cronometro_por_tarefa;
+  document.getElementById('cfDiasPrazo').value = c.dias_alerta_prazo ?? 3;
+  document.getElementById('cfDiasAniversario').value = c.dias_alerta_aniversario ?? 15;
+  document.getElementById('cfDiasConcluidas').value = c.dias_mostrar_concluidas ?? 30;
+  document.getElementById('cfNomeEscritorio').value = c.nome_escritorio || 'SAMI Arquitetura';
+  document.getElementById('cfCidade').value = c.cidade_padrao || 'Jundiaí';
+  document.getElementById('cfValorHora').value = c.valor_hora_tecnica ? String(c.valor_hora_tecnica).replace('.', ',') : '';
+  document.getElementById('cfGoogleEmail').value = c.google_calendar_email || '';
+  document.getElementById('configSalvo').textContent = '';
+}
+
+async function salvarConfiguracoes(e){
+  e.preventDefault();
+  const valorHora = document.getElementById('cfValorHora').value.trim();
+
+  const resultado = await sb.from('config_sistema').update({
+    cronometro_por_tarefa: document.getElementById('cfCronometroTarefa').checked,
+    dias_alerta_prazo: Number(document.getElementById('cfDiasPrazo').value) || 3,
+    dias_alerta_aniversario: Number(document.getElementById('cfDiasAniversario').value) || 15,
+    dias_mostrar_concluidas: Number(document.getElementById('cfDiasConcluidas').value) || 30,
+    nome_escritorio: document.getElementById('cfNomeEscritorio').value.trim() || 'SAMI Arquitetura',
+    cidade_padrao: document.getElementById('cfCidade').value.trim() || 'Jundiaí',
+    valor_hora_tecnica: valorHora ? parseValorBR(valorHora) : null,
+    google_calendar_email: document.getElementById('cfGoogleEmail').value.trim() || null,
+  }).eq('id', 1);
+
+  if(checarErro(resultado, 'salvar configurações')) return;
+
+  await carregarConfigSistema();
+  const aviso = document.getElementById('configSalvo');
+  aviso.textContent = 'Salvo!';
+  setTimeout(() => { aviso.textContent = ''; }, 2500);
+}
+
+/* ================= CRONÔMETRO POR ETAPA =================
+   Várias pessoas podem cronometrar a mesma etapa ao mesmo tempo —
+   cada registro guarda quem rodou, então um não interfere no outro. */
+
+function renderCronometroEtapa(et){
+  const rodando = (window._temposEtapaAbertos || []).filter(t => t.etapa_id === et.id);
+  const totalSeg = window._tempoTotalPorEtapa?.get(et.id) || 0;
+  const equipe = window._equipeAtiva || [];
+
+  return `<div class="cron-etapa">
+    <div class="cron-etapa-topo">
+      <p class="mono cron-etapa-label">Tempo nessa etapa</p>
+      <span class="mono cron-etapa-total">${totalSeg > 0 ? fmtHoras(totalSeg) : '—'}</span>
+    </div>
+
+    ${rodando.length > 0 ? `
+      <div class="cron-rodando-lista">
+        ${rodando.map(r => `
+          <div class="cron-rodando">
+            <span class="timer-dot"></span>
+            <span class="cron-rodando-txt"><b>${esc(r.equipe?.nome||'')}</b> desde ${new Date(r.inicio).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
+            <button class="timer-stop" onclick="pararCronometroEtapa('${r.id}')">■ Parar</button>
+          </div>`).join('')}
+      </div>` : ''}
+
+    <div class="cron-etapa-acao">
+      <select id="cron-et-${et.id}" class="timer-select">
+        <option value="">Quem vai trabalhar nessa etapa?</option>
+        ${equipe.filter(m => !rodando.some(r => r.equipe_id === m.id))
+                .map(m => `<option value="${m.id}">${esc(m.nome)}</option>`).join('')}
+      </select>
+      <button class="timer-go" onclick="iniciarCronometroEtapa('${et.id}')">▶ Iniciar</button>
+    </div>
+  </div>`;
+}
+
+async function iniciarCronometroEtapa(etapaId){
+  const sel = document.getElementById('cron-et-'+etapaId);
+  const equipeId = sel ? sel.value : null;
+  if(!equipeId){
+    const temEquipe = (window._equipeAtiva||[]).length > 0;
+    alert(temEquipe
+      ? 'Escolhe quem vai trabalhar nessa etapa antes de iniciar o cronômetro.'
+      : 'Cadastre pelo menos uma pessoa ativa em "Equipe" antes de usar o cronômetro.');
+    if(sel) sel.focus();
+    return;
+  }
+
+  // Uma pessoa não pode ter dois cronômetros rodando ao mesmo tempo
+  const { data: jaRodando } = await sb.from('tarefas_tempo')
+    .select('id, etapas(nome), tarefas(titulo)')
+    .eq('equipe_id', equipeId).is('fim', null).maybeSingle();
+
+  if(jaRodando){
+    const onde = jaRodando.etapas?.nome || jaRodando.tarefas?.titulo || 'outro lugar';
+    if(!confirm(`Essa pessoa já tem um cronômetro rodando em "${onde}". Parar aquele e começar esse?`)) return;
+    await sb.from('tarefas_tempo').update({ fim: new Date().toISOString() }).eq('id', jaRodando.id);
+  }
+
+  const resultado = await sb.from('tarefas_tempo').insert({
+    etapa_id: etapaId, equipe_id: equipeId, inicio: new Date().toISOString(),
+  });
+  if(checarErro(resultado, 'iniciar cronômetro da etapa')) return;
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+async function pararCronometroEtapa(tempoId){
+  const resultado = await sb.from('tarefas_tempo').update({ fim: new Date().toISOString() }).eq('id', tempoId);
+  if(checarErro(resultado, 'parar cronômetro')) return;
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+/* ================= CONCLUIR PROJETO ================= */
+async function concluirProjetoAtual(){
+  if(!dadosProjetoAtual) return;
+
+  // Avisa se ainda tem coisa em aberto, mas não impede
+  const [{ data: tarefasAbertas }, { data: parcelasAbertas }] = await Promise.all([
+    sb.from('tarefas').select('id').eq('projeto_id', projetoAtualId).neq('status','concluida').eq('arquivada', false),
+    sb.from('financeiro_parcelas').select('id,valor').eq('projeto_id', projetoAtualId).neq('status','pago'),
+  ]);
+
+  const pendencias = [];
+  if((tarefasAbertas||[]).length > 0) pendencias.push(`${tarefasAbertas.length} tarefa(s) ainda não concluída(s)`);
+  if((parcelasAbertas||[]).length > 0){
+    const total = parcelasAbertas.reduce((s,p) => s + Number(p.valor), 0);
+    pendencias.push(`${fmtMoeda(total)} ainda a receber`);
+  }
+
+  const texto = pendencias.length > 0
+    ? `Concluir "${dadosProjetoAtual.nome}"?\n\nAtenção, ainda há:\n• ${pendencias.join('\n• ')}\n\nO projeto sai da contagem de "em andamento", mas continua acessível e o que está a receber continua no financeiro.`
+    : `Concluir "${dadosProjetoAtual.nome}"?\n\nEle sai da contagem de projetos em andamento, mas continua acessível em Projetos.`;
+
+  if(!confirm(texto)) return;
+
+  const r = await sb.from('projetos').update({ status: 'concluido' }).eq('id', projetoAtualId);
+  if(checarErro(r, 'concluir projeto')) return;
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+/* Mostra o botão de concluir e o aviso quando o projeto está pronto */
+function atualizarAvisoProjetoPronto(projeto, execucao){
+  const btn = document.getElementById('btnConcluirProjeto');
+  const aviso = document.getElementById('avisoProjetoPronto');
+  if(!btn || !aviso) return;
+
+  const emAndamento = projeto.status === 'em_andamento';
+  const tudoFeito = execucao && execucao.percentual_execucao >= 100 && execucao.total_tarefas > 0;
+
+  btn.style.display = emAndamento ? '' : 'none';
+  aviso.classList.toggle('hidden', !(emAndamento && tudoFeito));
+}
+
+/* ================= TAREFAS DO ESCRITÓRIO (tela Início) ================= */
+function renderTarefasEscritorio(tarefas){
+  const cont = document.getElementById('tarefasEscritorio');
+  if(!cont) return;
+
+  const doEscritorio = (tarefas||[]).filter(t => !t.projeto_id);
+  if(doEscritorio.length === 0){
+    cont.innerHTML = '<p class="muted" style="padding:16px;font-size:13px;">Nada pendente no escritório.</p>';
+    return;
+  }
+
+  const hojeStr = dataLocalISO();
+  cont.innerHTML = doEscritorio.slice(0,8).map(t => {
+    const atrasada = t.prazo && t.prazo < hojeStr;
+    return `<div class="linha-item" style="padding:10px 14px;">
+      <input type="checkbox" onchange="concluirTarefaEscritorio('${t.id}')" style="width:16px;height:16px;accent-color:var(--sage);flex-shrink:0;cursor:pointer;" />
+      <div class="linha-txt">
+        <p style="font-size:13.5px;">${esc(t.titulo)}</p>
+        ${t.prazo ? `<span style="color:${atrasada?'var(--alert)':'var(--graphite)'};">${fmtDataBR(t.prazo)}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function criarTarefaEscritorio(e){
+  e.preventDefault();
+  const titulo = document.getElementById('teTitulo').value.trim();
+  if(!titulo) return;
+  const r = await sb.from('tarefas').insert({
+    titulo,
+    projeto_id: null,
+    prazo: document.getElementById('tePrazo').value || null,
+  });
+  if(checarErro(r, 'criar tarefa do escritório')) return;
+  e.target.reset();
+  toggleForm('formTarefaEscritorio', false);
+  loadInicio();
+}
+
+async function concluirTarefaEscritorio(id){
+  const r = await sb.from('tarefas').update({
+    status: 'concluida',
+    concluida_em: new Date().toISOString(),
+  }).eq('id', id);
+  if(checarErro(r, 'concluir tarefa')) return;
+  loadInicio();
+}
+
+/* ================= PROPOSTA COMERCIAL ================= */
+const STATUS_PROPOSTA_LABEL = { rascunho:'Rascunho', enviada:'Enviada', vista:'Vista', aceita:'Aceita', expirada:'Expirada' };
+const STATUS_PROPOSTA_COR = { rascunho:'var(--graphite)', enviada:'var(--clay)', vista:'var(--terracotta)', aceita:'var(--sage)', expirada:'var(--alert)' };
+const TIPO_PROPOSTA_LABEL = { completo:'Projeto Completo', consultoria:'Consultoria' };
+
+/* A proposta "expira" só pro link do cliente — continua toda visível aqui dentro. */
+function propostaExpirada(p){
+  if(!p || p.status === 'aceita' || !p.enviada_em) return false;
+  const limite = new Date(p.enviada_em).getTime() + (p.validade_dias || 30) * 86400000;
+  return Date.now() > limite;
+}
+function statusExibidoProposta(p){
+  return propostaExpirada(p) ? 'expirada' : p.status;
+}
+function linkPropostaPublica(token){
+  return new URL('proposta.html', window.location.href).href + '?token=' + token;
+}
+function copiarLinkProposta(link){
+  navigator.clipboard.writeText(link).then(() => alert('Link copiado!'));
+}
+
+async function uploadImagemProposta(file){
+  const ext = file.name.split('.').pop();
+  const nomeArquivo = `${crypto.randomUUID ? crypto.randomUUID() : Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await sb.storage.from('propostas-imagens').upload(nomeArquivo, file);
+  if(error){ alert('Não consegui enviar a imagem: ' + error.message); return null; }
+  const { data } = sb.storage.from('propostas-imagens').getPublicUrl(nomeArquivo);
+  return data?.publicUrl || null;
+}
+
+/* ---- Lista de propostas ---- */
+let destinatarioPropostaModo = 'lead';
+function alternarDestinatarioProposta(modo){
+  destinatarioPropostaModo = modo;
+  document.getElementById('npLeadCampos').classList.toggle('hidden', modo!=='lead');
+  document.getElementById('npClienteCampos').classList.toggle('hidden', modo!=='cliente');
+  document.getElementById('btnDestLead').classList.toggle('on', modo==='lead');
+  document.getElementById('btnDestCliente').classList.toggle('on', modo==='cliente');
+}
+
+async function loadPropostas(){
+  const cont = document.getElementById('gridPropostas');
+  cont.innerHTML = '<p class="muted" style="padding:16px;">Carregando...</p>';
+  await preencherSelectClientes('npPropClienteId');
+
+  const { data: propostas, error } = await sb.from('propostas')
+    .select('id,tipo,status,titulo,lead_nome,pacote_valor,contra_proposta_pagamento,resposta_tipo,enviada_em,validade_dias,criado_em,clientes(nome_completo)')
+    .order('criado_em', { ascending:false });
+
+  if(error){ cont.innerHTML = '<p class="muted" style="padding:16px;">Não consegui carregar as propostas.</p>'; return; }
+  if(!propostas || propostas.length===0){
+    cont.innerHTML = '<p class="muted" style="padding:16px;">Nenhuma proposta criada ainda.</p>';
+    return;
+  }
+
+  cont.innerHTML = `<table>
+    <thead><tr><th>Proposta</th><th>Destinatário</th><th>Tipo</th><th>Valor</th><th>Status</th></tr></thead>
+    <tbody>
+      ${propostas.map(p => {
+        const statusEx = statusExibidoProposta(p);
+        const nome = p.clientes?.nome_completo || p.lead_nome || '—';
+        return `<tr style="cursor:pointer;" onclick="navigate('proposta-detalhe',{propostaId:'${p.id}'})">
+          <td>${esc(p.titulo)}${p.contra_proposta_pagamento ? ' <span title="Cliente sugeriu outra forma de pagamento">💬</span>' : ''}</td>
+          <td>${esc(nome)}</td>
+          <td>${TIPO_PROPOSTA_LABEL[p.tipo]||p.tipo}</td>
+          <td>${fmtMoeda(p.pacote_valor)}</td>
+          <td><span class="pill" style="color:${STATUS_PROPOSTA_COR[statusEx]};border-color:${STATUS_PROPOSTA_COR[statusEx]};">${STATUS_PROPOSTA_LABEL[statusEx]}</span></td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+}
+
+async function criarProposta(e){
+  e.preventDefault();
+  const titulo = document.getElementById('npPropTitulo').value.trim();
+  if(!titulo) return;
+  const tipo = document.getElementById('npPropTipo').value;
+
+  const dados = { titulo, tipo, eyebrow: tipo==='consultoria' ? 'Proposta de Consultoria' : 'Proposta de Projeto' };
+  if(destinatarioPropostaModo === 'cliente'){
+    const clienteId = document.getElementById('npPropClienteId').value;
+    if(!clienteId){ alert('Escolha um cliente cadastrado, ou mude pra "Lead novo".'); return; }
+    dados.cliente_id = clienteId;
+  } else {
+    const leadNome = document.getElementById('npPropLeadNome').value.trim();
+    if(!leadNome){ alert('Informe o nome do lead.'); return; }
+    dados.lead_nome = leadNome;
+    dados.lead_telefone = document.getElementById('npPropLeadTelefone').value.trim() || null;
+    dados.lead_email = document.getElementById('npPropLeadEmail').value.trim() || null;
+  }
+
+  const { data: cfg } = await sb.from('config_propostas').select('validade_dias_padrao').eq('id',1).maybeSingle();
+  dados.validade_dias = cfg?.validade_dias_padrao || 30;
+
+  const resultado = await sb.from('propostas').insert(dados).select('id').single();
+  if(checarErro(resultado, 'criar proposta')) return;
+
+  e.target.reset();
+  alternarDestinatarioProposta('lead');
+  toggleForm('formNovaProposta', false);
+  navigate('proposta-detalhe', { propostaId: resultado.data.id });
+}
+
+/* ---- Detalhe / edição da proposta ---- */
+let propostaAtualId = null;
+let dadosPropostaAtual = null;
+
+async function loadPropostaDetalhe(propostaId){
+  propostaAtualId = propostaId;
+  const [{ data: p }, { data: etapas }, { data: entregaveis }, { data: bonus }] = await Promise.all([
+    sb.from('propostas').select('*, clientes(nome_completo)').eq('id', propostaId).single(),
+    sb.from('proposta_etapas').select('*, proposta_etapa_produtos(id,texto,ordem), proposta_etapa_imagens(id,url,legenda,ordem)').eq('proposta_id', propostaId).order('ordem'),
+    sb.from('proposta_entregaveis').select('*').eq('proposta_id', propostaId).order('ordem'),
+    sb.from('proposta_bonus').select('*').eq('proposta_id', propostaId).order('ordem'),
+  ]);
+  if(!p){ navigate('propostas'); return; }
+  dadosPropostaAtual = p;
+
+  const statusEx = statusExibidoProposta(p);
+  document.getElementById('pdPropTitulo').textContent = p.titulo;
+  document.getElementById('pdPropStatus').innerHTML = `<span class="pill" style="color:${STATUS_PROPOSTA_COR[statusEx]};border-color:${STATUS_PROPOSTA_COR[statusEx]};">${STATUS_PROPOSTA_LABEL[statusEx]}</span>`;
+  document.getElementById('pdPropDestinatario').textContent = p.clientes?.nome_completo || p.lead_nome || '—';
+
+  const link = linkPropostaPublica(p.portal_token);
+  document.getElementById('pdPropLink').value = link;
+  document.getElementById('pdPropAbrir').href = link;
+  const botaoEnviar = document.getElementById('pdPropBotaoEnviar');
+  if(p.status === 'aceita'){
+    botaoEnviar.classList.add('hidden');
+  } else {
+    botaoEnviar.classList.remove('hidden');
+    botaoEnviar.textContent = p.status==='rascunho' ? 'Marcar como enviada' : 'Renovar validade (reenviar)';
+  }
+
+  const respCont = document.getElementById('pdPropResposta');
+  if(p.resposta_tipo){
+    respCont.classList.remove('hidden');
+    respCont.innerHTML = `<p class="label" style="margin-bottom:6px;">Resposta do cliente</p>
+      <p style="font-size:13.5px;margin:0 0 4px;">${p.resposta_tipo==='aceita' ? '✓ Proposta aceita' : '💬 Cliente quer conversar antes de decidir'}${p.respondida_em ? ' — ' + fmtDataBR(p.respondida_em.slice(0,10)) : ''}</p>
+      ${p.contra_proposta_pagamento ? `<p style="font-size:13px;color:var(--graphite);margin:0 0 4px;"><b>Sugestão de pagamento do cliente:</b> ${esc(p.contra_proposta_pagamento)}</p>` : ''}
+      ${p.projeto_id ? `<button type="button" class="btn-ghost" style="padding:0;font-size:12.5px;text-decoration:underline;" onclick="navigate('projeto-detalhe',{projetoId:'${p.projeto_id}'})">Abrir o projeto criado ›</button>` : ''}`;
+  } else {
+    respCont.classList.add('hidden');
+  }
+
+  document.getElementById('ppTipo').value = p.tipo;
+  document.getElementById('ppEyebrow').value = p.eyebrow || '';
+  document.getElementById('ppTituloInput').value = p.titulo || '';
+  document.getElementById('ppTags').value = p.tags || '';
+  document.getElementById('ppDescricao').value = p.descricao || '';
+  document.getElementById('ppPlantaLegenda').value = p.planta_legenda || '';
+  document.getElementById('ppPlantaPreview').innerHTML = p.planta_url
+    ? `<div class="proj-thumb" style="background-image:url('${esc(p.planta_url)}');height:110px;"></div>`
+    : '<p class="muted" style="font-size:12px;">Nenhuma planta enviada ainda.</p>';
+  document.getElementById('ppPacoteNome').value = p.pacote_nome || '';
+  document.getElementById('ppPacoteValor').value = p.pacote_valor ? String(p.pacote_valor).replace('.',',') : '';
+  document.getElementById('ppInvestNota').value = p.invest_nota || '';
+  document.getElementById('ppMostrarVisitas').checked = !!p.mostrar_visitas;
+  document.getElementById('ppVisitaCampos').classList.toggle('hidden', !p.mostrar_visitas);
+  document.getElementById('ppVisitaNome').value = p.visita_nome || '';
+  document.getElementById('ppVisitaValor').value = p.visita_valor ? String(p.visita_valor).replace('.',',') : '';
+  document.getElementById('ppVisitaDescricao').value = p.visita_descricao || '';
+  document.getElementById('ppEntradaTexto').value = p.entrada_texto || '';
+  document.getElementById('ppParcelasTexto').value = p.parcelas_texto || '';
+  document.getElementById('ppPgtoNota').value = p.pgto_nota || '';
+  document.getElementById('ppMostrarBonus').checked = !!p.mostrar_bonus;
+  document.getElementById('pdBonusCard').classList.toggle('hidden', !p.mostrar_bonus);
+  document.getElementById('ppValidadeDias').value = p.validade_dias || 30;
+
+  document.getElementById('pdEtapasLista').innerHTML = (etapas||[]).length===0
+    ? '<p class="muted" style="font-size:12.5px;">Nenhuma etapa cadastrada ainda.</p>'
+    : etapas.map((et,i) => `
+    <div class="linha-item" style="align-items:flex-start;">
+      <div class="linha-txt" style="cursor:pointer;" onclick="abrirModalEditarEtapaProposta('${et.id}')">
+        <p style="font-size:13.5px;font-weight:600;">${i+1}. ${esc(et.nome)}</p>
+        <span>${esc(et.quando||'sem prazo definido')}${(et.proposta_etapa_produtos||[]).length ? ' · ' + et.proposta_etapa_produtos.length + ' produto(s)' : ''}${(et.proposta_etapa_imagens||[]).length ? ' · ' + et.proposta_etapa_imagens.length + ' imagem(ns)' : ''}</span>
+      </div>
+      <div style="display:flex;gap:2px;flex-shrink:0;">
+        <button type="button" class="btn-ghost" title="Mover pra cima" style="padding:4px 7px;" onclick="moverEtapaProposta('${et.id}',-1)">↑</button>
+        <button type="button" class="btn-ghost" title="Mover pra baixo" style="padding:4px 7px;" onclick="moverEtapaProposta('${et.id}',1)">↓</button>
+        <button type="button" class="remove-link" onclick="excluirComConfirmacao('proposta_etapas','${et.id}','essa etapa', () => loadPropostaDetalhe('${propostaId}'))">excluir</button>
+      </div>
+    </div>`).join('');
+
+  document.getElementById('pdEntregaveisLista').innerHTML = (entregaveis||[]).length===0
+    ? '<p class="muted" style="font-size:12.5px;">Nenhum entregável cadastrado ainda.</p>'
+    : entregaveis.map(x => `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+      <span style="flex:1;font-size:13px;">${esc(x.texto)}</span>
+      <button type="button" class="remove-link" onclick="excluirComConfirmacao('proposta_entregaveis','${x.id}','esse entregável', () => loadPropostaDetalhe('${propostaId}'))">remover</button>
+    </div>`).join('');
+
+  document.getElementById('pdBonusLista').innerHTML = (bonus||[]).length===0
+    ? '<p class="muted" style="font-size:12.5px;">Nenhum bônus cadastrado ainda.</p>'
+    : bonus.map(x => `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+      <span style="flex:1;font-size:13px;">${esc(x.texto)}</span>
+      <button type="button" class="remove-link" onclick="excluirComConfirmacao('proposta_bonus','${x.id}','esse bônus', () => loadPropostaDetalhe('${propostaId}'))">remover</button>
+    </div>`).join('');
+}
+
+function alternarVisitaProposta(){
+  document.getElementById('ppVisitaCampos').classList.toggle('hidden', !document.getElementById('ppMostrarVisitas').checked);
+}
+function alternarBonusProposta(){
+  document.getElementById('pdBonusCard').classList.toggle('hidden', !document.getElementById('ppMostrarBonus').checked);
+}
+
+async function salvarProposta(e){
+  e.preventDefault();
+  const valorPacote = document.getElementById('ppPacoteValor').value.trim();
+  const valorVisita = document.getElementById('ppVisitaValor').value.trim();
+
+  const resultado = await sb.from('propostas').update({
+    tipo: document.getElementById('ppTipo').value,
+    eyebrow: document.getElementById('ppEyebrow').value.trim() || 'Proposta de Projeto',
+    titulo: document.getElementById('ppTituloInput').value.trim(),
+    tags: document.getElementById('ppTags').value.trim() || null,
+    descricao: document.getElementById('ppDescricao').value.trim() || null,
+    planta_legenda: document.getElementById('ppPlantaLegenda').value.trim() || null,
+    pacote_nome: document.getElementById('ppPacoteNome').value.trim() || 'Pacote',
+    pacote_valor: valorPacote ? (parseValorBR(valorPacote) || 0) : 0,
+    invest_nota: document.getElementById('ppInvestNota').value.trim() || null,
+    mostrar_visitas: document.getElementById('ppMostrarVisitas').checked,
+    visita_nome: document.getElementById('ppVisitaNome').value.trim() || null,
+    visita_valor: valorVisita ? (parseValorBR(valorVisita) || null) : null,
+    visita_descricao: document.getElementById('ppVisitaDescricao').value.trim() || null,
+    entrada_texto: document.getElementById('ppEntradaTexto').value.trim() || null,
+    parcelas_texto: document.getElementById('ppParcelasTexto').value.trim() || null,
+    pgto_nota: document.getElementById('ppPgtoNota').value.trim() || null,
+    mostrar_bonus: document.getElementById('ppMostrarBonus').checked,
+    validade_dias: Number(document.getElementById('ppValidadeDias').value) || 30,
+  }).eq('id', propostaAtualId);
+  if(checarErro(resultado, 'salvar proposta')) return;
+
+  const arquivoPlanta = document.getElementById('ppPlantaArquivo').files[0];
+  if(arquivoPlanta){
+    const url = await uploadImagemProposta(arquivoPlanta);
+    if(url) await sb.from('propostas').update({ planta_url: url }).eq('id', propostaAtualId);
+  }
+
+  const aviso = document.getElementById('pdPropSalvo');
+  aviso.textContent = 'Salvo!';
+  setTimeout(() => { aviso.textContent = ''; }, 2500);
+  loadPropostaDetalhe(propostaAtualId);
+}
+
+async function enviarOuRenovarProposta(){
+  const resultado = await sb.from('propostas').update({
+    status: 'enviada', enviada_em: new Date().toISOString(), visto_em: null,
+  }).eq('id', propostaAtualId);
+  if(checarErro(resultado, 'marcar proposta como enviada')) return;
+  loadPropostaDetalhe(propostaAtualId);
+}
+
+async function excluirPropostaAtual(){
+  await excluirComConfirmacao('propostas', propostaAtualId, 'essa proposta', () => navigate('propostas'));
+}
+
+/* ---- Etapas da proposta ---- */
+async function adicionarEtapaProposta(){
+  const nome = document.getElementById('npEtapaNome').value.trim();
+  if(!nome) return;
+  const { data: existentes } = await sb.from('proposta_etapas').select('ordem').eq('proposta_id', propostaAtualId).order('ordem',{ascending:false}).limit(1);
+  const proximaOrdem = existentes && existentes[0] ? existentes[0].ordem + 1 : 0;
+  const resultado = await sb.from('proposta_etapas').insert({
+    proposta_id: propostaAtualId,
+    nome,
+    quando: document.getElementById('npEtapaQuando').value.trim() || null,
+    ordem: proximaOrdem,
+  });
+  if(checarErro(resultado, 'adicionar etapa')) return;
+  document.getElementById('npEtapaNome').value = '';
+  document.getElementById('npEtapaQuando').value = '';
+  loadPropostaDetalhe(propostaAtualId);
+}
+
+async function moverEtapaProposta(etapaId, direcao){
+  const { data: etapas } = await sb.from('proposta_etapas').select('id,ordem').eq('proposta_id', propostaAtualId).order('ordem');
+  if(!etapas) return;
+  const i = etapas.findIndex(e => e.id === etapaId);
+  const j = i + direcao;
+  if(i<0 || j<0 || j>=etapas.length) return;
+  await sb.from('proposta_etapas').update({ ordem: etapas[j].ordem }).eq('id', etapas[i].id);
+  await sb.from('proposta_etapas').update({ ordem: etapas[i].ordem }).eq('id', etapas[j].id);
+  loadPropostaDetalhe(propostaAtualId);
+}
+
+async function abrirModalEditarEtapaProposta(etapaId){
+  const { data: etapa } = await sb.from('proposta_etapas').select('*, proposta_etapa_produtos(id,texto,ordem), proposta_etapa_imagens(id,url,legenda,ordem)').eq('id', etapaId).single();
+  if(!etapa) return;
+  const produtosTexto = (etapa.proposta_etapa_produtos||[]).slice().sort((a,b)=>a.ordem-b.ordem).map(p=>p.texto).join('\n');
+  const imagens = (etapa.proposta_etapa_imagens||[]).slice().sort((a,b)=>a.ordem-b.ordem);
+
+  abrirModal(`
+    <p class="label" style="margin-bottom:14px;">Editar etapa</p>
+    <form onsubmit="salvarEdicaoEtapaProposta(event,'${etapaId}')">
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <input id="edEtNome" required value="${esc(etapa.nome)}" placeholder="Nome da etapa" style="flex:2;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
+        <input id="edEtQuando" value="${esc(etapa.quando||'')}" placeholder="Prazo (ex: 10 dias úteis)" style="flex:1.4;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
+      </div>
+      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Texto do "saber mais"</label>
+      <textarea id="edEtParagrafo" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:4px 0 10px;font-family:inherit;">${esc(etapa.paragrafo||'')}</textarea>
+      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Produtos apresentados (um por linha)</label>
+      <textarea id="edEtProdutos" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:4px 0 10px;font-family:inherit;">${esc(produtosTexto)}</textarea>
+      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Aviso / observação (opcional)</label>
+      <textarea id="edEtNota" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:4px 0 14px;font-family:inherit;">${esc(etapa.nota||'')}</textarea>
+
+      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Imagens de referência</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
+        ${imagens.map(im => `
+          <div style="position:relative;width:70px;height:70px;">
+            <div class="proj-thumb" style="width:70px;height:70px;background-image:url('${esc(im.url)}');margin:0;"></div>
+            <button type="button" onclick="removerImagemEtapaProposta('${im.id}','${etapaId}')" style="position:absolute;top:-6px;right:-6px;background:var(--alert);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:1;">×</button>
+          </div>`).join('')}
+      </div>
+      <input id="edEtImagens" type="file" accept="image/*" multiple style="margin-bottom:14px;" />
+
+      <div class="form-actions">
+        <button type="submit" class="btn">Salvar etapa</button>
+        <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+      </div>
+    </form>
+  `);
+}
+
+async function salvarEdicaoEtapaProposta(e, etapaId){
+  e.preventDefault();
+  const resultado = await sb.from('proposta_etapas').update({
+    nome: document.getElementById('edEtNome').value.trim(),
+    quando: document.getElementById('edEtQuando').value.trim() || null,
+    paragrafo: document.getElementById('edEtParagrafo').value.trim() || null,
+    nota: document.getElementById('edEtNota').value.trim() || null,
+  }).eq('id', etapaId);
+  if(checarErro(resultado, 'salvar etapa')) return;
+
+  const produtosLinhas = document.getElementById('edEtProdutos').value.split('\n').map(l=>l.trim()).filter(Boolean);
+  await sb.from('proposta_etapa_produtos').delete().eq('etapa_id', etapaId);
+  if(produtosLinhas.length > 0){
+    await sb.from('proposta_etapa_produtos').insert(produtosLinhas.map((texto,i) => ({ etapa_id: etapaId, texto, ordem:i })));
+  }
+
+  const arquivos = Array.from(document.getElementById('edEtImagens').files || []);
+  if(arquivos.length > 0){
+    const urls = await Promise.all(arquivos.map(uploadImagemProposta));
+    const validas = urls.filter(Boolean);
+    if(validas.length > 0){
+      const { data: existentes } = await sb.from('proposta_etapa_imagens').select('ordem').eq('etapa_id', etapaId).order('ordem',{ascending:false}).limit(1);
+      let ordem = existentes && existentes[0] ? existentes[0].ordem + 1 : 0;
+      await sb.from('proposta_etapa_imagens').insert(validas.map(url => ({ etapa_id: etapaId, url, ordem: ordem++ })));
+    }
+  }
+
+  fecharModalEditar();
+  loadPropostaDetalhe(propostaAtualId);
+}
+
+async function removerImagemEtapaProposta(imagemId, etapaId){
+  if(!confirm('Remover essa imagem?')) return;
+  await sb.from('proposta_etapa_imagens').delete().eq('id', imagemId);
+  abrirModalEditarEtapaProposta(etapaId);
+}
+
+/* ---- Entregáveis e bônus (listas simples) ---- */
+async function adicionarEntregavelProposta(){
+  const texto = document.getElementById('npEntregavelTexto').value.trim();
+  if(!texto) return;
+  const { data: existentes } = await sb.from('proposta_entregaveis').select('ordem').eq('proposta_id', propostaAtualId).order('ordem',{ascending:false}).limit(1);
+  const proximaOrdem = existentes && existentes[0] ? existentes[0].ordem + 1 : 0;
+  const resultado = await sb.from('proposta_entregaveis').insert({ proposta_id: propostaAtualId, texto, ordem: proximaOrdem });
+  if(checarErro(resultado, 'adicionar entregável')) return;
+  document.getElementById('npEntregavelTexto').value = '';
+  loadPropostaDetalhe(propostaAtualId);
+}
+
+async function adicionarBonusProposta(){
+  const texto = document.getElementById('npBonusTexto').value.trim();
+  if(!texto) return;
+  const { data: existentes } = await sb.from('proposta_bonus').select('ordem').eq('proposta_id', propostaAtualId).order('ordem',{ascending:false}).limit(1);
+  const proximaOrdem = existentes && existentes[0] ? existentes[0].ordem + 1 : 0;
+  const resultado = await sb.from('proposta_bonus').insert({ proposta_id: propostaAtualId, texto, ordem: proximaOrdem });
+  if(checarErro(resultado, 'adicionar bônus')) return;
+  document.getElementById('npBonusTexto').value = '';
+  loadPropostaDetalhe(propostaAtualId);
+}
+
+/* ---- Configurações fixas da Proposta Comercial ---- */
+async function loadConfigPropostas(){
+  const [{ data: cfg }, { data: galeria }] = await Promise.all([
+    sb.from('config_propostas').select('*').eq('id',1).maybeSingle(),
+    sb.from('proposta_galeria').select('*').order('ordem'),
+  ]);
+  const c = cfg || {};
+  document.getElementById('cfPropSobreTexto').value = c.sobre_texto || '';
+  document.getElementById('cfPropRrt').value = c.rrt_padrao_texto || '';
+  document.getElementById('cfPropEntrega').value = c.entrega_texto || '';
+  document.getElementById('cfPropFechamento').value = c.fechamento_texto || '';
+  document.getElementById('cfPropValidade').value = c.validade_dias_padrao || 30;
+
+  [1,2,3].forEach(n => {
+    const url = c['foto_equipe_'+n+'_url'];
+    const el = document.getElementById('cfPropFotoEquipe'+n);
+    el.innerHTML = url
+      ? `<div class="proj-thumb" style="background-image:url('${esc(url)}');height:70px;margin:0;"></div>`
+      : '<p class="muted" style="font-size:11px;margin:0;">Sem foto</p>';
+  });
+
+  document.getElementById('cfPropGaleria').innerHTML = (galeria||[]).length===0
+    ? '<p class="muted" style="font-size:12px;">Nenhuma foto na galeria ainda.</p>'
+    : galeria.map(g => `
+    <div style="position:relative;width:80px;height:80px;">
+      <div class="proj-thumb" style="width:80px;height:80px;background-image:url('${esc(g.url)}');margin:0;"></div>
+      <button type="button" onclick="removerGaleriaProposta('${g.id}')" style="position:absolute;top:-6px;right:-6px;background:var(--alert);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:1;">×</button>
+    </div>`).join('');
+}
+
+async function salvarConfigPropostas(e){
+  e.preventDefault();
+  const resultado = await sb.from('config_propostas').update({
+    sobre_texto: document.getElementById('cfPropSobreTexto').value.trim() || null,
+    rrt_padrao_texto: document.getElementById('cfPropRrt').value.trim() || null,
+    entrega_texto: document.getElementById('cfPropEntrega').value.trim() || null,
+    fechamento_texto: document.getElementById('cfPropFechamento').value.trim() || null,
+    validade_dias_padrao: Number(document.getElementById('cfPropValidade').value) || 30,
+  }).eq('id', 1);
+  if(checarErro(resultado, 'salvar configurações da proposta')) return;
+
+  const aviso = document.getElementById('configPropSalvo');
+  aviso.textContent = 'Salvo!';
+  setTimeout(() => { aviso.textContent = ''; }, 2500);
+}
+
+async function uploadFotoEquipeProposta(n, input){
+  const file = input.files[0];
+  if(!file) return;
+  const url = await uploadImagemProposta(file);
+  if(!url) return;
+  const campo = 'foto_equipe_'+n+'_url';
+  await sb.from('config_propostas').update({ [campo]: url }).eq('id', 1);
+  loadConfigPropostas();
+}
+
+async function uploadGaleriaProposta(input){
+  const arquivos = Array.from(input.files || []);
+  if(arquivos.length === 0) return;
+  const urls = await Promise.all(arquivos.map(uploadImagemProposta));
+  const validas = urls.filter(Boolean);
+  if(validas.length === 0) return;
+  const { data: existentes } = await sb.from('proposta_galeria').select('ordem').order('ordem',{ascending:false}).limit(1);
+  let ordem = existentes && existentes[0] ? existentes[0].ordem + 1 : 0;
+  await sb.from('proposta_galeria').insert(validas.map(url => ({ url, ordem: ordem++ })));
+  input.value = '';
+  loadConfigPropostas();
+}
+
+async function removerGaleriaProposta(id){
+  if(!confirm('Remover essa foto da galeria?')) return;
+  await sb.from('proposta_galeria').delete().eq('id', id);
+  loadConfigPropostas();
 }

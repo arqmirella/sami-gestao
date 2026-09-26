@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Proposta · SAMI Arquitetura</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --paper:#F6F2EC; --ink:#211C18; --graphite:#5C554C; --line:#E3DACD;
+    --terracotta:#C1602E; --terracottaDark:#A94E24; --sage:#5C6E5A; --clay:#9C6B4F; --alert:#8B3A2B;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;}
+  h1,h2,h3{font-family:'Space Grotesk',sans-serif;margin:0;}
+  .mono{font-family:'IBM Plex Mono',monospace;}
+
+  .estado{text-align:center;padding:80px 24px;color:var(--graphite);font-size:14.5px;max-width:420px;margin:0 auto;}
+
+  .wrap{max-width:640px;margin:0 auto;padding:28px 16px 70px;}
+  .tela{background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 1px 2px rgba(33,28,24,.04),0 10px 30px -14px rgba(33,28,24,.14);}
+
+  .esc-capa{background:linear-gradient(160deg,var(--terracotta) 0%,var(--terracottaDark) 100%);color:#fff;padding:34px 26px 28px;}
+  .esc-logo{width:44px;height:44px;object-fit:contain;border-radius:10px;background:#fff;padding:4px;margin-bottom:16px;}
+  .esc-eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.08em;opacity:.85;margin:0 0 8px;}
+  .esc-titulo{font-size:25px;font-weight:600;line-height:1.25;margin:0 0 8px;}
+  .esc-cliente{font-size:13.5px;opacity:.9;margin:0 0 14px;}
+  .esc-tags{display:flex;gap:6px;flex-wrap:wrap;}
+  .esc-tag{background:rgba(255,255,255,.16);border-radius:99px;padding:5px 12px;font-size:11.5px;}
+
+  .bloco-p{padding:22px 26px;border-bottom:1px solid var(--paper);}
+  .bloco-p:last-child{border-bottom:none;}
+  .bloco-label{font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--terracotta);margin:0 0 10px;}
+  .bloco-p p.txt{font-size:14px;line-height:1.65;color:var(--graphite);margin:0 0 8px;white-space:pre-wrap;}
+  .bloco-p p.txt:last-child{margin-bottom:0;}
+
+  .imagem-ref{margin:12px 0 0;border-radius:8px;overflow:hidden;border:1px solid var(--line);}
+  .imagem-ref img{display:block;width:100%;height:auto;}
+  .imagem-ref-legenda{font-size:11px;color:var(--graphite);padding:7px 10px;background:var(--paper);font-style:italic;}
+  .grid-imagens{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px;}
+  .grid-imagens .imagem-ref{margin:0;}
+
+  .sobre-fotos{display:flex;gap:6px;margin-top:14px;}
+  .sobre-foto{flex:1;height:64px;border-radius:8px;overflow:hidden;background:var(--paper) center/cover no-repeat;}
+
+  .galeria-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+  .galeria-item{border-radius:8px;overflow:hidden;aspect-ratio:1;background:var(--paper) center/cover no-repeat;}
+
+  .etapa-item{border-bottom:1px solid var(--paper);}
+  .etapa-item:last-child{border-bottom:none;}
+  .etapa-resumo{display:flex;align-items:center;gap:13px;padding:13px 0;cursor:pointer;list-style:none;}
+  .etapa-resumo::-webkit-details-marker{display:none;}
+  .etapa-num{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:14px;color:var(--terracotta);width:18px;flex-shrink:0;}
+  .etapa-nome-linha{flex:1;min-width:0;}
+  .etapa-nome-linha p{font-size:14px;font-weight:600;margin:0;}
+  .etapa-nome-linha span{font-size:12px;color:var(--graphite);}
+  .etapa-saber-mais{font-size:12px;color:var(--terracotta);white-space:nowrap;display:flex;align-items:center;gap:3px;}
+  .etapa-chevron{transition:transform .15s;font-size:14px;}
+  .etapa-item[open] .etapa-chevron{transform:rotate(90deg);}
+  .etapa-corpo{padding:0 0 18px 31px;}
+  .etapa-corpo p.txt{font-size:13.5px;}
+  .etapa-sub{font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;margin:10px 0 6px;}
+  .etapa-lista{margin:0 0 10px;padding-left:16px;font-size:13px;color:var(--graphite);line-height:1.75;}
+  .nota-suave{background:var(--paper);border-left:2.5px solid var(--clay);border-radius:0 7px 7px 0;padding:10px 13px;font-size:12.5px;color:var(--graphite);line-height:1.55;margin:10px 0;}
+  .nota-suave b{color:var(--ink);}
+
+  .invest-topo{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;gap:10px;}
+  .invest-nome{font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600;}
+  .invest-valor{font-family:'Space Grotesk',sans-serif;font-size:21px;font-weight:700;color:var(--terracotta);white-space:nowrap;}
+  .invest-lista{margin:0 0 8px;padding-left:16px;font-size:13px;color:var(--graphite);line-height:1.85;}
+  .invest-nota{font-size:12px;color:var(--graphite);font-style:italic;}
+
+  .visita-card{background:var(--paper);border-radius:10px;padding:15px 17px;margin-top:16px;}
+  .visita-topo{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px;}
+  .visita-nome{font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:600;}
+  .visita-valor{font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:700;color:var(--terracotta);white-space:nowrap;}
+
+  .pgto-sugestao{background:var(--paper);border-radius:10px;padding:14px 16px;margin:2px 0 14px;}
+  .pgto-linha{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;padding:3px 0;}
+  .pgto-linha b{font-family:'IBM Plex Mono',monospace;}
+  .pgto-nota{font-size:11.5px;color:var(--graphite);margin:8px 0 0;font-style:italic;}
+  .pgto-campo label{font-size:12.5px;color:var(--graphite);display:block;margin-bottom:7px;}
+  .pgto-campo textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13.5px;font-family:inherit;resize:vertical;}
+
+  .bonus-lista{margin:0;padding-left:16px;font-size:13.5px;color:var(--graphite);line-height:1.85;}
+
+  .fechamento-nota{font-size:13px;color:var(--graphite);text-align:center;font-style:italic;line-height:1.65;}
+
+  .aceite-botoes{display:flex;flex-direction:column;gap:10px;}
+  .btn-aceitar{background:var(--terracotta);color:#fff;border:none;border-radius:10px;padding:15px;font-size:15px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;}
+  .btn-aceitar:disabled{opacity:.5;cursor:not-allowed;}
+  .btn-duvida{background:none;border:1px solid var(--line);color:var(--graphite);border-radius:10px;padding:12px;font-size:13.5px;cursor:pointer;font-family:'Inter',sans-serif;}
+
+  .validade{text-align:center;font-size:12px;color:var(--graphite);padding:18px 26px 26px;}
+
+  .aviso-faixa{background:var(--paper);border-left:3px solid var(--clay);padding:14px 18px;font-size:13px;color:var(--graphite);line-height:1.55;margin:0 0 20px;border-radius:0 10px 10px 0;}
+  .aviso-faixa.sucesso{border-left-color:var(--sage);}
+  .aviso-faixa.alerta{border-left-color:var(--alert);}
+
+  .confirmacao{text-align:center;padding:10px 4px;}
+  .confirmacao .icone{font-size:34px;margin-bottom:10px;}
+  .confirmacao p{font-size:14px;color:var(--graphite);line-height:1.6;}
+
+  .hidden{display:none !important;}
+</style>
+</head>
+<body>
+
+<div class="wrap" id="conteudo">
+  <div class="estado">Carregando proposta...</div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://kyawrtkhgheqjgofjnti.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_-hD_wTqLCMlLQct3DBTFZw_UvIvLHap";
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtMoeda(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function fmtDataHora(iso){
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+}
+
+let dadosProposta = null;
+
+async function iniciar(){
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token');
+  const cont = document.getElementById('conteudo');
+
+  if(!token){
+    cont.innerHTML = '<div class="estado">Link inválido — peça o link correto pro escritório da SAMI.</div>';
+    return;
+  }
+  window._token = token;
+  window._sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  await carregarERenderizar();
+}
+
+async function carregarERenderizar(){
+  const cont = document.getElementById('conteudo');
+  const { data, error } = await window._sb.rpc('proposta_publica_dados', { p_token: window._token });
+
+  if(error || !data){
+    cont.innerHTML = '<div class="estado">Não encontramos essa proposta. O link pode estar incompleto — peça o link correto pro escritório da SAMI.</div>';
+    return;
+  }
+
+  dadosProposta = data;
+  renderizarProposta(data);
+}
+
+function imagemBloco(im){
+  return `<div class="imagem-ref"><img src="${esc(im.url)}" loading="lazy" /></div>${im.legenda ? `<p class="imagem-ref-legenda">${esc(im.legenda)}</p>` : ''}`;
+}
+
+function renderizarProposta(p){
+  const cont = document.getElementById('conteudo');
+  const cfg = p.config || {};
+  const fotosEquipe = (cfg.fotos_equipe || []).filter(Boolean);
+  const jaAceita = p.status === 'aceita';
+  const jaRespondeuDuvida = p.resposta_tipo === 'duvida';
+
+  let faixaAviso = '';
+  if(jaAceita){
+    faixaAviso = `<div class="aviso-faixa sucesso">✓ Proposta aceita — em breve entraremos em contato pra dar os próximos passos.</div>`;
+  } else if(p.expirada){
+    faixaAviso = `<div class="aviso-faixa alerta">Essa proposta venceu. Fale com a gente pra receber uma nova via, com os valores atualizados.</div>`;
+  } else if(jaRespondeuDuvida){
+    faixaAviso = `<div class="aviso-faixa">Você pediu pra conversar antes de decidir — já estamos providenciando. Fique à vontade pra responder por aqui de novo quando quiser.</div>`;
+  }
+
+  const tags = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+
+  cont.innerHTML = `
+    ${faixaAviso}
+    <div class="tela">
+      <div class="esc-capa">
+        <img class="esc-logo" src="${new URL('logo-sami.png', window.location.href).href}" alt="" onerror="this.style.display='none'" />
+        <p class="esc-eyebrow">${esc(p.eyebrow || 'Proposta de Projeto')}</p>
+        <h1 class="esc-titulo">${esc(p.titulo)}</h1>
+        ${p.nome_destinatario ? `<p class="esc-cliente">${esc(p.nome_destinatario)}</p>` : ''}
+        ${tags.length ? `<div class="esc-tags">${tags.map(t => `<span class="esc-tag">${esc(t)}</span>`).join('')}</div>` : ''}
+      </div>
+
+      ${cfg.sobre_texto ? `
+      <div class="bloco-p">
+        <p class="bloco-label">Sobre o escritório</p>
+        <p class="txt">${esc(cfg.sobre_texto)}</p>
+        ${fotosEquipe.length ? `<div class="sobre-fotos">${fotosEquipe.map(u => `<div class="sobre-foto" style="background-image:url('${esc(u)}');"></div>`).join('')}</div>` : ''}
+      </div>` : ''}
+
+      ${p.descricao || p.planta_url ? `
+      <div class="bloco-p">
+        <p class="bloco-label">Sobre o projeto</p>
+        ${p.descricao ? `<p class="txt">${esc(p.descricao)}</p>` : ''}
+        ${p.planta_url ? imagemBloco({url:p.planta_url, legenda:p.planta_legenda}) : ''}
+      </div>` : ''}
+
+      ${(p.etapas||[]).length ? `
+      <div class="bloco-p">
+        <p class="bloco-label">Etapas do projeto</p>
+        ${p.etapas.map((et,i) => `
+          <details class="etapa-item">
+            <summary class="etapa-resumo">
+              <span class="etapa-num">${i+1}</span>
+              <span class="etapa-nome-linha"><p>${esc(et.nome)}</p><span>${esc(et.quando||'')}</span></span>
+              <span class="etapa-saber-mais">saber mais <span class="etapa-chevron">›</span></span>
+            </summary>
+            <div class="etapa-corpo">
+              ${et.paragrafo ? `<p class="txt">${esc(et.paragrafo)}</p>` : ''}
+              ${(et.produtos||[]).length ? `<p class="etapa-sub">Produtos apresentados:</p><ul class="etapa-lista">${et.produtos.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+              ${et.nota ? `<div class="nota-suave">${esc(et.nota)}</div>` : ''}
+              ${(et.imagens||[]).length===1 ? imagemBloco(et.imagens[0]) : ''}
+              ${(et.imagens||[]).length>1 ? `<div class="grid-imagens">${et.imagens.map(im=>`<div class="imagem-ref"><img src="${esc(im.url)}" loading="lazy" /></div>`).join('')}</div>` : ''}
+            </div>
+          </details>`).join('')}
+      </div>` : ''}
+
+      ${(p.galeria||[]).length ? `
+      <div class="bloco-p">
+        <p class="bloco-label">Nosso portfólio</p>
+        <div class="galeria-grid">${p.galeria.map(u => `<div class="galeria-item" style="background-image:url('${esc(u)}');"></div>`).join('')}</div>
+      </div>` : ''}
+
+      <div class="bloco-p">
+        <p class="bloco-label">Investimento</p>
+        <div class="invest-topo">
+          <span class="invest-nome">${esc(p.pacote_nome)}</span>
+          <span class="invest-valor">${fmtMoeda(p.pacote_valor)}</span>
+        </div>
+        ${(p.entregaveis||[]).length ? `<ul class="invest-lista">${p.entregaveis.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        ${p.invest_nota ? `<p class="invest-nota">${esc(p.invest_nota)}</p>` : ''}
+        ${p.mostrar_visitas ? `
+        <div class="visita-card">
+          <div class="visita-topo"><span class="visita-nome">${esc(p.visita_nome||'')}</span>${p.visita_valor ? `<span class="visita-valor">${fmtMoeda(p.visita_valor)}</span>` : ''}</div>
+          ${p.visita_descricao ? `<p class="txt" style="font-size:12.5px;">${esc(p.visita_descricao)}</p>` : ''}
+        </div>` : ''}
+      </div>
+
+      <div class="bloco-p">
+        <p class="bloco-label">Forma de pagamento</p>
+        ${(p.entrada_texto || p.parcelas_texto) ? `
+        <div class="pgto-sugestao">
+          ${p.entrada_texto ? `<div class="pgto-linha"><span>Entrada</span><b>${esc(p.entrada_texto)}</b></div>` : ''}
+          ${p.parcelas_texto ? `<div class="pgto-linha"><span>Restante em</span><b>${esc(p.parcelas_texto)}</b></div>` : ''}
+          ${(p.pgto_nota || cfg.rrt_padrao_texto) ? `<p class="pgto-nota">${esc([p.pgto_nota, cfg.rrt_padrao_texto].filter(Boolean).join(' · '))}</p>` : ''}
+        </div>` : ''}
+        ${!jaAceita && !p.expirada ? `
+        <div class="pgto-campo">
+          <label>Prefere outra forma de pagamento? (opcional)</label>
+          <textarea id="campoPagamentoAlt" rows="2" placeholder="Ex: consigo pagar em mais parcelas...">${esc(p.contra_proposta_pagamento||'')}</textarea>
+        </div>` : (p.contra_proposta_pagamento ? `<p class="txt" style="font-size:12.5px;"><b>Sua sugestão enviada:</b> ${esc(p.contra_proposta_pagamento)}</p>` : '')}
+      </div>
+
+      ${p.mostrar_bonus && (p.bonus||[]).length ? `
+      <div class="bloco-p">
+        <p class="bloco-label">Bônus de contrato</p>
+        <ul class="bonus-lista">${p.bonus.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>
+      </div>` : ''}
+
+      ${cfg.entrega_texto ? `
+      <div class="bloco-p">
+        <p class="bloco-label">Entrega do projeto</p>
+        <p class="txt">${esc(cfg.entrega_texto)}</p>
+      </div>` : ''}
+
+      ${cfg.fechamento_texto ? `
+      <div class="bloco-p">
+        <p class="fechamento-nota">${esc(cfg.fechamento_texto)}</p>
+      </div>` : ''}
+
+      <div class="bloco-p" id="blocoAceite">
+        ${renderBlocoAceite(p)}
+      </div>
+
+      ${p.enviada_em ? `<p class="validade">${p.expirada ? 'Proposta enviada em ' + fmtDataHora(p.enviada_em).split(' às ')[0] + ' — validade encerrada' : 'Proposta válida por ' + (p.validade_dias||30) + ' dias a partir do envio'}</p>` : ''}
+    </div>
+  `;
+}
+
+function renderBlocoAceite(p){
+  if(p.status === 'aceita'){
+    return `<div class="confirmacao"><div class="icone">✓</div><p><b>Proposta aceita!</b><br>Em breve alguém do nosso time vai entrar em contato pra combinar os próximos passos.</p></div>`;
+  }
+  if(p.expirada){
+    return `<div class="confirmacao"><div class="icone">⏱</div><p>Essa proposta já venceu. Chama a gente que reenviamos uma nova via.</p></div>`;
+  }
+  return `<div class="aceite-botoes">
+    <button class="btn-aceitar" id="btnAceitar" onclick="aceitarProposta()">✓ Aceitar proposta</button>
+    <button class="btn-duvida" id="btnDuvida" onclick="pedirDuvida()">Tenho dúvidas, quero conversar</button>
+  </div>`;
+}
+
+function valorPagamentoAlternativo(){
+  const campo = document.getElementById('campoPagamentoAlt');
+  return campo ? campo.value.trim() : '';
+}
+
+async function aceitarProposta(){
+  const btn = document.getElementById('btnAceitar');
+  if(btn){ btn.disabled = true; btn.textContent = 'Enviando...'; }
+
+  const { data, error } = await window._sb.rpc('proposta_publica_aceitar', {
+    p_token: window._token,
+    p_pagamento_alternativo: valorPagamentoAlternativo() || null,
+  });
+
+  if(error || !data || !data.ok){
+    if(btn){ btn.disabled = false; btn.textContent = '✓ Aceitar proposta'; }
+    if(data && data.erro === 'expirada'){
+      alert('Essa proposta venceu — fale com a gente pra receber uma nova via.');
+    } else {
+      alert('Não consegui registrar a aceitação agora. Tenta de novo em instantes ou chama a gente direto.');
+    }
+    return;
+  }
+
+  await carregarERenderizar();
+  window.scrollTo(0,0);
+}
+
+async function pedirDuvida(){
+  const btn = document.getElementById('btnDuvida');
+  if(btn){ btn.disabled = true; btn.textContent = 'Enviando...'; }
+
+  const { data, error } = await window._sb.rpc('proposta_publica_duvida', {
+    p_token: window._token,
+    p_pagamento_alternativo: valorPagamentoAlternativo() || null,
+  });
+
+  if(error || !data){
+    if(btn){ btn.disabled = false; btn.textContent = 'Tenho dúvidas, quero conversar'; }
+    alert('Não consegui enviar agora. Tenta de novo em instantes ou chama a gente direto.');
+    return;
+  }
+
+  document.getElementById('blocoAceite').innerHTML = `<div class="confirmacao"><div class="icone">💬</div><p><b>Combinado!</b><br>Já avisamos o escritório — vamos te chamar pra conversar.</p></div>`;
+}
+
+iniciar();
+</script>
+
+</body>
+</html>

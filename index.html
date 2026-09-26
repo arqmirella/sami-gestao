@@ -75,6 +75,7 @@
         </div>
 
         <button class="navbtn" data-view="clientes" onclick="navigate('clientes')">Clientes</button>
+        <button class="navbtn" data-view="propostas" onclick="navigate('propostas')">Propostas</button>
 
         <p class="nav-grupo">Escritório</p>
         <button class="navbtn navbtn-pai" data-view="conteudo" onclick="navigate('conteudo')">
@@ -87,6 +88,7 @@
         </div>
         <button class="navbtn" data-view="fornecedores" onclick="navigate('fornecedores')">Fornecedores</button>
         <button class="navbtn" data-view="equipe" onclick="navigate('equipe')">Equipe</button>
+        <button class="navbtn" data-view="config" onclick="navigate('config')">Configurações</button>
       </nav>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;">
@@ -191,6 +193,19 @@
                 <button type="submit" class="btn" style="padding:8px 16px;">Enviar</button>
               </form>
             </div>
+          </div>
+
+          <div class="bloco">
+            <div class="bloco-topo">
+              <h2>Escritório</h2>
+              <button class="link-bloco" onclick="toggleForm('formTarefaEscritorio')">+ nova</button>
+            </div>
+            <form id="formTarefaEscritorio" class="hidden" style="display:flex;gap:6px;margin-bottom:8px;" onsubmit="criarTarefaEscritorio(event)">
+              <input id="teTitulo" required placeholder="Ex: ligar pro contador" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px;" />
+              <input id="tePrazo" type="date" style="border:1px solid var(--line);border-radius:9px;padding:8px;font-size:12.5px;" />
+              <button class="btn" style="padding:8px 14px;">ok</button>
+            </form>
+            <div class="card" id="tarefasEscritorio" style="padding:0;"></div>
           </div>
 
           <div class="bloco">
@@ -318,6 +333,7 @@
             <button type="button" class="chip" data-filtro="em_andamento" onclick="filtrarTarefas('em_andamento')">Em andamento</button>
             <button type="button" class="chip" data-filtro="concluida" onclick="filtrarTarefas('concluida')">Concluída</button>
             <button type="button" class="chip" data-filtro="atrasada" onclick="filtrarTarefas('atrasada')">Atrasada</button>
+            <button type="button" class="chip" data-filtro="escritorio" onclick="filtrarTarefas('escritorio')">Escritório</button>
           </div>
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
             <select id="filtroAmbienteTarefas" onchange="filtrarAmbienteTarefas(this.value)" style="border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:12.5px;">
@@ -337,7 +353,7 @@
         </div>
         <form id="formNovaTarefa" class="form-box hidden" onsubmit="criarTarefaGlobal(event)">
           <input id="ntTitulo" required placeholder="Título da tarefa" />
-          <select id="ntProjeto"></select>
+          <select id="ntProjeto" data-opcional="true"><option value="">Tarefa do escritório (sem projeto)</option></select>
           <div style="display:flex;gap:10px;align-items:center;margin-bottom:4px;">
             <label class="mono" style="font-size:10.5px;text-transform:uppercase;color:var(--graphite);flex:1;">Início</label>
             <label class="mono" style="font-size:10.5px;text-transform:uppercase;color:var(--graphite);flex:1;">Prazo</label>
@@ -405,11 +421,17 @@
           <p class="label" id="pdCliente"></p>
           <h1 id="pdNome" style="margin:0;"></h1>
         </div>
-        <div style="display:flex;align-items:center;gap:12px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end;">
+          <button id="btnConcluirProjeto" class="btn" style="display:none;" onclick="concluirProjetoAtual()">✓ Concluir projeto</button>
           <select id="pdStatus" class="mono" style="border:1px solid var(--line);border-radius:8px;padding:7px;font-size:13px;" onchange="atualizarStatusProjeto(this.value)"></select>
           <button class="btn-ghost" style="border:1px solid var(--line);border-radius:8px;font-size:12px;" onclick="duplicarProjetoAtual()">⧉ Duplicar projeto</button>
           <button class="remove-link mono" style="text-transform:uppercase;" onclick="excluirProjetoAtual()">Excluir projeto</button>
         </div>
+      </div>
+
+      <div id="avisoProjetoPronto" class="hidden" style="background:rgba(92,110,90,.10);border-left:3px solid var(--sage);border-radius:0 10px 10px 0;padding:14px 18px;margin-bottom:20px;">
+        <p style="margin:0;font-size:14px;font-weight:600;color:var(--sage);">Todas as tarefas desse projeto foram concluídas</p>
+        <p style="margin:3px 0 0;font-size:13px;color:var(--graphite);">Quando terminar de fato, clique em "Concluir projeto" ali em cima — ele sai da contagem de projetos em andamento, mas continua acessível em Projetos e no financeiro.</p>
       </div>
 
       <div class="pd-nav-wrap">
@@ -918,6 +940,168 @@
       <div class="card" id="cdConteudo"></div>
     </section>
 
+    <!-- PROPOSTA COMERCIAL — lista -->
+    <section id="view-propostas" class="hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+        <h1 style="margin:0;">Propostas</h1>
+        <button class="btn" onclick="toggleForm('formNovaProposta')">+ Nova proposta</button>
+      </div>
+      <form id="formNovaProposta" class="form-box hidden" style="max-width:640px;" onsubmit="criarProposta(event)">
+        <p class="label">Tipo de proposta</p>
+        <select id="npPropTipo" style="margin-bottom:14px;">
+          <option value="completo">Projeto Completo</option>
+          <option value="consultoria">Consultoria</option>
+        </select>
+
+        <p class="label">Destinatário</p>
+        <div class="chip-select">
+          <button type="button" id="btnDestLead" class="chip on" onclick="alternarDestinatarioProposta('lead')">Lead novo (sem cadastro)</button>
+          <button type="button" id="btnDestCliente" class="chip" onclick="alternarDestinatarioProposta('cliente')">Cliente já cadastrado</button>
+        </div>
+        <div id="npLeadCampos">
+          <input id="npPropLeadNome" placeholder="Nome do lead" />
+          <div style="display:flex;gap:8px;">
+            <input id="npPropLeadTelefone" placeholder="Telefone" style="flex:1;" />
+            <input id="npPropLeadEmail" placeholder="E-mail" style="flex:1;" />
+          </div>
+        </div>
+        <div id="npClienteCampos" class="hidden">
+          <select id="npPropClienteId"></select>
+        </div>
+
+        <p class="label" style="margin-top:14px;">Título da proposta</p>
+        <input id="npPropTitulo" required placeholder="Ex: Uma casa feita pra sua história" />
+        <p class="muted" style="font-size:11.5px;margin:4px 0 0;">Depois de criar, você edita etapas, investimento, pagamento, planta e bônus na tela seguinte.</p>
+
+        <div class="form-actions">
+          <button type="submit" class="btn">Criar e continuar editando</button>
+          <button type="button" class="btn-ghost" onclick="toggleForm('formNovaProposta', false)">Cancelar</button>
+        </div>
+      </form>
+      <div class="card" style="padding:0;" id="gridPropostas"></div>
+    </section>
+
+    <!-- PROPOSTA COMERCIAL — detalhe / editor -->
+    <section id="view-proposta-detalhe" class="hidden">
+      <button class="btn-ghost mono" style="font-size:12px;text-transform:uppercase;padding:0;margin-bottom:14px;" onclick="navigate('propostas')">‹ Voltar pra Propostas</button>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;flex-wrap:wrap;gap:10px;">
+        <div>
+          <h1 id="pdPropTitulo" style="margin:0 0 4px;"></h1>
+          <p class="muted" style="margin:0;">Para: <span id="pdPropDestinatario"></span></p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span id="pdPropStatus"></span>
+          <button class="remove-link mono" style="text-transform:uppercase;" onclick="excluirPropostaAtual()">Excluir proposta</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin:18px 0;">
+        <p class="label" style="margin-bottom:10px;">Link para o cliente</p>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+          <input id="pdPropLink" readonly style="flex:1;min-width:220px;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12px;" onclick="this.select()" />
+          <button class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;" onclick="copiarLinkProposta(document.getElementById('pdPropLink').value)">Copiar</button>
+          <a id="pdPropAbrir" href="#" target="_blank" class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;font-size:12px;">Abrir como o cliente vê</a>
+        </div>
+        <button class="btn" id="pdPropBotaoEnviar" onclick="enviarOuRenovarProposta()">Marcar como enviada</button>
+        <p class="muted" style="font-size:11.5px;margin:8px 0 0;">A proposta vale por 30 dias (ou o prazo definido abaixo) a partir do envio. Depois disso o link deixa de aceitar respostas do cliente, mas a proposta continua visível aqui — use "Renovar validade" pra reenviar.</p>
+      </div>
+
+      <div class="card hidden" id="pdPropResposta" style="margin:18px 0;background:var(--paper);"></div>
+
+      <form id="formEditarProposta" onsubmit="salvarProposta(event)">
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Sobre a proposta</p>
+          <div style="display:flex;gap:8px;margin-bottom:10px;">
+            <select id="ppTipo" style="flex:1;">
+              <option value="completo">Projeto Completo</option>
+              <option value="consultoria">Consultoria</option>
+            </select>
+            <input id="ppTags" placeholder="Tags (separadas por vírgula) — ex: Residencial, Reforma" style="flex:2;" />
+          </div>
+          <input id="ppEyebrow" placeholder="Texto pequeno no topo — ex: Proposta de Projeto" style="margin-bottom:10px;" />
+          <input id="ppTituloInput" required placeholder="Título da proposta" style="margin-bottom:10px;" />
+          <textarea id="ppDescricao" rows="3" placeholder="Descrição do projeto (o que será feito, metragem, localização...)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-family:inherit;margin-bottom:10px;"></textarea>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Planta / imagem de referência (opcional)</label>
+          <div id="ppPlantaPreview" style="margin:6px 0 8px;"></div>
+          <input id="ppPlantaArquivo" type="file" accept="image/*" style="margin-bottom:8px;" />
+          <input id="ppPlantaLegenda" placeholder="Legenda da imagem (ex: Planta fornecida pela cliente)" />
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Investimento</p>
+          <div style="display:flex;gap:8px;margin-bottom:10px;">
+            <input id="ppPacoteNome" placeholder="Nome do pacote — ex: Pacote Premium Completo" style="flex:2;" />
+            <input id="ppPacoteValor" placeholder="Valor — ex: 68000" style="flex:1;" />
+          </div>
+          <input id="ppInvestNota" placeholder="Nota sobre prazo/investimento (ex: Tempo estimado do início ao final: 2 meses)" style="margin-bottom:10px;" />
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--graphite);margin-bottom:8px;cursor:pointer;">
+            <input id="ppMostrarVisitas" type="checkbox" onchange="alternarVisitaProposta()" style="width:16px;height:16px;accent-color:var(--terracotta);" />
+            Incluir visitas de acompanhamento como item separado
+          </label>
+          <div id="ppVisitaCampos" class="hidden" style="padding-left:4px;">
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+              <input id="ppVisitaNome" placeholder="Nome — ex: Visitas de Acompanhamento (pacote com 4)" style="flex:2;" />
+              <input id="ppVisitaValor" placeholder="Valor — ex: 1680" style="flex:1;" />
+            </div>
+            <input id="ppVisitaDescricao" placeholder="Descrição curta (opcional)" />
+          </div>
+
+          <p class="label" style="margin:16px 0 10px;">Entregáveis</p>
+          <div id="pdEntregaveisLista" style="margin-bottom:8px;"></div>
+          <div style="display:flex;gap:6px;">
+            <input id="npEntregavelTexto" placeholder="+ adicionar entregável" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();adicionarEntregavelProposta();}" />
+            <button type="button" class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;" onclick="adicionarEntregavelProposta()">Adicionar</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Forma de pagamento</p>
+          <div style="display:flex;gap:8px;margin-bottom:8px;">
+            <input id="ppEntradaTexto" placeholder="Entrada — ex: R$ 20.400 ou 30%" style="flex:1;" />
+            <input id="ppParcelasTexto" placeholder="Restante — ex: 10x no cartão" style="flex:1;" />
+          </div>
+          <input id="ppPgtoNota" placeholder="Nota (ex: Ou boleto, parcela mínima de R$ 900 · RRT à parte, R$ 580)" />
+          <p class="muted" style="font-size:11.5px;margin:8px 0 0;">No link do cliente, aparece um campo pra ele sugerir outra forma de pagamento — a sugestão aparece aqui na proposta depois que ele responder.</p>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--graphite);margin-bottom:10px;cursor:pointer;">
+            <input id="ppMostrarBonus" type="checkbox" onchange="alternarBonusProposta()" style="width:16px;height:16px;accent-color:var(--terracotta);" />
+            <span class="label" style="margin:0;">Bônus de contrato</span>
+          </label>
+          <div id="pdBonusCard" class="hidden">
+            <div id="pdBonusLista" style="margin-bottom:8px;"></div>
+            <div style="display:flex;gap:6px;">
+              <input id="npBonusTexto" placeholder="+ adicionar bônus" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();adicionarBonusProposta();}" />
+              <button type="button" class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;" onclick="adicionarBonusProposta()">Adicionar</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Etapas do projeto</p>
+          <div id="pdEtapasLista" style="margin-bottom:10px;"></div>
+          <div style="display:flex;gap:6px;">
+            <input id="npEtapaNome" placeholder="Nome da etapa — ex: Briefing" style="flex:2;" onkeydown="if(event.key==='Enter'){event.preventDefault();adicionarEtapaProposta();}" />
+            <input id="npEtapaQuando" placeholder="Prazo — ex: 10 dias úteis" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();adicionarEtapaProposta();}" />
+            <button type="button" class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;" onclick="adicionarEtapaProposta()">Adicionar</button>
+          </div>
+          <p class="muted" style="font-size:11.5px;margin:8px 0 0;">Clique numa etapa da lista pra escrever o texto do "saber mais", os produtos apresentados, um aviso e as imagens de referência.</p>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Validade</p>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Válida por (dias, a partir do envio)</label>
+          <input id="ppValidadeDias" type="number" min="1" max="180" style="width:140px;" />
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn">Salvar proposta</button>
+          <span id="pdPropSalvo" class="mono" style="font-size:12px;color:var(--sage);align-self:center;"></span>
+        </div>
+      </form>
+    </section>
+
     <!-- CONTEÚDO (planner de redes sociais) -->
     <section id="view-conteudo" class="hidden">
       <h1>Conteúdo</h1>
@@ -1234,6 +1418,125 @@
 
     <!-- ORÇAMENTOS -->
     <!-- EQUIPE -->
+    <!-- CONFIGURAÇÕES -->
+    <section id="view-config" class="hidden">
+      <h1>Configurações</h1>
+      <p class="muted" style="max-width:620px;">Ajustes que valem pro sistema todo. As mudanças passam a valer na próxima vez que a tela carregar.</p>
+
+      <form id="formConfig" onsubmit="salvarConfiguracoes(event)" style="max-width:620px;">
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:4px;">Cronômetro</p>
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;background:var(--paper);border-radius:10px;cursor:pointer;">
+            <input id="cfCronometroTarefa" type="checkbox" style="width:17px;height:17px;accent-color:var(--terracotta);margin-top:2px;flex-shrink:0;" />
+            <span>
+              <span style="font-size:13.5px;display:block;">Mostrar cronômetro em cada tarefa</span>
+              <span class="muted" style="font-size:12px;">Útil pra acompanhar o tempo de estagiário ou funcionário. Com isso desligado, o tempo é medido só por etapa — bem menos cliques no dia a dia.</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Alertas e prazos</p>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:150px;">
+              <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Avisar prazo com (dias)</label>
+              <input id="cfDiasPrazo" type="number" min="1" max="60" style="width:100%;" />
+            </div>
+            <div style="flex:1;min-width:150px;">
+              <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Avisar aniversário com (dias)</label>
+              <input id="cfDiasAniversario" type="number" min="1" max="90" style="width:100%;" />
+            </div>
+            <div style="flex:1;min-width:150px;">
+              <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Manter concluídas por (dias)</label>
+              <input id="cfDiasConcluidas" type="number" min="1" max="365" style="width:100%;" />
+            </div>
+          </div>
+          <p class="muted" style="font-size:11.5px;margin:8px 0 0;">Tarefas concluídas somem do kanban após esse prazo — continuam salvas e contando nos relatórios.</p>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Escritório</p>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Nome (aparece nos documentos)</label>
+          <input id="cfNomeEscritorio" style="width:100%;margin-bottom:10px;" />
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:150px;">
+              <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Cidade (foro dos contratos)</label>
+              <input id="cfCidade" style="width:100%;" />
+            </div>
+            <div style="flex:1;min-width:150px;">
+              <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Valor da hora técnica</label>
+              <input id="cfValorHora" placeholder="150,00" style="width:100%;" />
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Agenda do Google</p>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">E-mail da agenda exibida na tela Início</label>
+          <input id="cfGoogleEmail" type="email" placeholder="samiarquitetura@gmail.com" style="width:100%;" />
+          <p class="muted" style="font-size:11.5px;margin:8px 0 0;">A agenda precisa estar pública nas configurações do Google Calendar pra aparecer aqui.</p>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn">Salvar configurações</button>
+          <span id="configSalvo" class="mono" style="font-size:12px;color:var(--sage);align-self:center;"></span>
+        </div>
+      </form>
+
+      <h1 style="margin-top:36px;">Proposta Comercial</h1>
+      <p class="muted" style="max-width:620px;">O que fica fixo em toda proposta enviada ao cliente — edita uma vez aqui, vale pra todas.</p>
+      <form id="formConfigPropostas" onsubmit="salvarConfigPropostas(event)" style="max-width:620px;">
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Sobre o escritório</p>
+          <textarea id="cfPropSobreTexto" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-family:inherit;margin-bottom:12px;" placeholder="Texto que aparece em toda proposta, na seção 'Sobre o escritório'"></textarea>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Fotos da equipe</label>
+          <div style="display:flex;gap:10px;margin-top:6px;">
+            <div style="flex:1;">
+              <div id="cfPropFotoEquipe1" style="margin-bottom:6px;"></div>
+              <input type="file" accept="image/*" onchange="uploadFotoEquipeProposta(1,this)" />
+            </div>
+            <div style="flex:1;">
+              <div id="cfPropFotoEquipe2" style="margin-bottom:6px;"></div>
+              <input type="file" accept="image/*" onchange="uploadFotoEquipeProposta(2,this)" />
+            </div>
+            <div style="flex:1;">
+              <div id="cfPropFotoEquipe3" style="margin-bottom:6px;"></div>
+              <input type="file" accept="image/*" onchange="uploadFotoEquipeProposta(3,this)" />
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Nosso portfólio (galeria mostrada antes do investimento)</p>
+          <div id="cfPropGaleria" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;"></div>
+          <input type="file" accept="image/*" multiple onchange="uploadGaleriaProposta(this)" />
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Textos fixos</p>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">RRT padrão</label>
+          <input id="cfPropRrt" style="width:100%;margin-bottom:10px;" placeholder="Ex: RRT à parte, R$ 580" />
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Entrega do projeto</label>
+          <input id="cfPropEntrega" style="width:100%;margin-bottom:10px;" placeholder="Ex: Todos os arquivos são entregues por e-mail e link do Google Drive." />
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Mensagem de fechamento</label>
+          <textarea id="cfPropFechamento" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-family:inherit;"></textarea>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <p class="label" style="margin-bottom:10px;">Validade padrão</p>
+          <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Dias de validade pra novas propostas</label>
+          <input id="cfPropValidade" type="number" min="1" max="180" style="width:140px;" />
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn">Salvar configurações da proposta</button>
+          <span id="configPropSalvo" class="mono" style="font-size:12px;color:var(--sage);align-self:center;"></span>
+        </div>
+      </form>
+    </section>
+
     <section id="view-equipe" class="hidden">
       <h1>Equipe</h1>
       <div class="grid" style="grid-template-columns:1.3fr 1fr;">
