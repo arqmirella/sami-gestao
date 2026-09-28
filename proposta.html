@@ -118,6 +118,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_-hD_wTqLCMlLQct3DBTFZw_UvIvLHap";
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtMoeda(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function textoQuandoPorDias(dias){
+  const n = Number(dias);
+  if(!n || n <= 0) return 'início imediato';
+  return n === 1 ? '1 dia útil' : `${n} dias úteis`;
+}
 function fmtDataHora(iso){
   const d = new Date(iso);
   return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
@@ -232,6 +237,7 @@ function renderizarProposta(p){
           <span class="invest-nome">${esc(p.pacote_nome)}</span>
           <span class="invest-valor">${fmtMoeda(p.pacote_valor)}</span>
         </div>
+        ${p.prazo_total_dias > 0 ? `<p class="invest-nota">Prazo estimado do início até a entrega final: <b>${textoQuandoPorDias(p.prazo_total_dias)}</b></p>` : ''}
         ${(p.entregaveis||[]).length ? `<ul class="invest-lista">${p.entregaveis.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : ''}
         ${p.invest_nota ? `<p class="invest-nota">${esc(p.invest_nota)}</p>` : ''}
         ${p.mostrar_visitas ? `

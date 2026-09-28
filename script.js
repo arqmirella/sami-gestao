@@ -180,7 +180,7 @@ function navigate(view, opts){
   if(view==='financeiro') trocarAbaFinanceiro(subaba);
   if(view==='fornecedores') loadFornecedores();
   if(view==='equipe') loadEquipe();
-  if(view==='config'){ loadConfiguracoes(); loadConfigPropostas(); }
+  if(view==='config'){ loadConfiguracoes(); loadConfigPropostas(); loadModelosEtapasProposta(); loadModelosBonusProposta(); }
   if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId, opts.aba);
   if(view==='cliente-detalhe' && opts.clienteId) loadClienteDetalhe(opts.clienteId);
   if(view==='proposta-detalhe' && opts.propostaId) loadPropostaDetalhe(opts.propostaId);
@@ -6575,6 +6575,46 @@ function copiarLinkProposta(link){
   navigator.clipboard.writeText(link).then(() => alert('Link copiado!'));
 }
 
+/* Gera o texto exibido a partir do número de dias úteis.
+   0 (ou vazio) = início imediato. */
+function textoQuandoPorDias(dias){
+  const n = Number(dias);
+  if(!n || n <= 0) return 'início imediato';
+  return n === 1 ? '1 dia útil' : `${n} dias úteis`;
+}
+
+/* Clona os modelos de etapa (por tipo) e o bônus padrão pra dentro
+   de uma proposta recém-criada — ela só ajusta os dias e o que for
+   diferente naquele caso específico. */
+async function clonarModelosParaProposta(propostaId, tipo){
+  const { data: modelos } = await sb.from('proposta_modelo_etapas')
+    .select('*, proposta_modelo_etapa_produtos(texto,ordem)')
+    .eq('tipo', tipo).order('ordem');
+
+  for(const m of (modelos||[])){
+    const resultado = await sb.from('proposta_etapas').insert({
+      proposta_id: propostaId,
+      ordem: m.ordem,
+      nome: m.nome,
+      quando_dias: m.quando_dias,
+      quando: textoQuandoPorDias(m.quando_dias),
+      paragrafo: m.paragrafo,
+      nota: m.nota,
+    }).select('id').single();
+    if(resultado.error || !resultado.data) continue;
+    const produtos = (m.proposta_modelo_etapa_produtos||[]).slice().sort((a,b)=>a.ordem-b.ordem);
+    if(produtos.length > 0){
+      await sb.from('proposta_etapa_produtos').insert(produtos.map(p => ({ etapa_id: resultado.data.id, texto: p.texto, ordem: p.ordem })));
+    }
+  }
+
+  const { data: bonusModelo } = await sb.from('proposta_modelo_bonus').select('*').order('ordem');
+  if((bonusModelo||[]).length > 0){
+    await sb.from('proposta_bonus').insert(bonusModelo.map(b => ({ proposta_id: propostaId, texto: b.texto, ordem: b.ordem })));
+    await sb.from('propostas').update({ mostrar_bonus: true }).eq('id', propostaId);
+  }
+}
+
 async function uploadImagemProposta(file){
   const ext = file.name.split('.').pop();
   const nomeArquivo = `${crypto.randomUUID ? crypto.randomUUID() : Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
@@ -6652,6 +6692,8 @@ async function criarProposta(e){
   const resultado = await sb.from('propostas').insert(dados).select('id').single();
   if(checarErro(resultado, 'criar proposta')) return;
 
+  await clonarModelosParaProposta(resultado.data.id, tipo);
+
   e.target.reset();
   alternarDestinatarioProposta('lead');
   toggleForm('formNovaProposta', false);
@@ -6712,6 +6754,10 @@ async function loadPropostaDetalhe(propostaId){
   document.getElementById('ppPacoteNome').value = p.pacote_nome || '';
   document.getElementById('ppPacoteValor').value = p.pacote_valor ? String(p.pacote_valor).replace('.',',') : '';
   document.getElementById('ppInvestNota').value = p.invest_nota || '';
+  const prazoTotalDias = (etapas||[]).reduce((soma, et) => soma + (et.quando_dias || 0), 0);
+  document.getElementById('pdPrazoCalculado').textContent = prazoTotalDias > 0
+    ? `Prazo estimado: ${textoQuandoPorDias(prazoTotalDias)} do início até a entrega final — calculado automaticamente pela soma dos dias das etapas.`
+    : 'Prazo estimado: preencha os dias nas etapas abaixo pra calcular sozinho.';
   document.getElementById('ppMostrarVisitas').checked = !!p.mostrar_visitas;
   document.getElementById('ppVisitaCampos').classList.toggle('hidden', !p.mostrar_visitas);
   document.getElementById('ppVisitaNome').value = p.visita_nome || '';
@@ -6818,17 +6864,19 @@ async function excluirPropostaAtual(){
 async function adicionarEtapaProposta(){
   const nome = document.getElementById('npEtapaNome').value.trim();
   if(!nome) return;
+  const dias = document.getElementById('npEtapaDias').value.trim();
   const { data: existentes } = await sb.from('proposta_etapas').select('ordem').eq('proposta_id', propostaAtualId).order('ordem',{ascending:false}).limit(1);
   const proximaOrdem = existentes && existentes[0] ? existentes[0].ordem + 1 : 0;
   const resultado = await sb.from('proposta_etapas').insert({
     proposta_id: propostaAtualId,
     nome,
-    quando: document.getElementById('npEtapaQuando').value.trim() || null,
+    quando_dias: dias ? Number(dias) : null,
+    quando: textoQuandoPorDias(dias),
     ordem: proximaOrdem,
   });
   if(checarErro(resultado, 'adicionar etapa')) return;
   document.getElementById('npEtapaNome').value = '';
-  document.getElementById('npEtapaQuando').value = '';
+  document.getElementById('npEtapaDias').value = '';
   loadPropostaDetalhe(propostaAtualId);
 }
 
@@ -6852,10 +6900,11 @@ async function abrirModalEditarEtapaProposta(etapaId){
   abrirModal(`
     <p class="label" style="margin-bottom:14px;">Editar etapa</p>
     <form onsubmit="salvarEdicaoEtapaProposta(event,'${etapaId}')">
-      <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <div style="display:flex;gap:8px;margin-bottom:6px;">
         <input id="edEtNome" required value="${esc(etapa.nome)}" placeholder="Nome da etapa" style="flex:2;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
-        <input id="edEtQuando" value="${esc(etapa.quando||'')}" placeholder="Prazo (ex: 10 dias úteis)" style="flex:1.4;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
+        <input id="edEtDias" type="number" min="0" value="${etapa.quando_dias ?? ''}" placeholder="Dias úteis" title="Dias úteis (0 = início imediato)" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" oninput="document.getElementById('edEtDiasPreview').textContent = textoQuandoPorDias(this.value)" />
       </div>
+      <p class="muted" style="font-size:11px;margin:0 0 10px;">Prazo mostrado pro cliente: <b id="edEtDiasPreview">${esc(textoQuandoPorDias(etapa.quando_dias))}</b> — muda sozinho conforme os dias.</p>
       <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Texto do "saber mais"</label>
       <textarea id="edEtParagrafo" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:4px 0 10px;font-family:inherit;">${esc(etapa.paragrafo||'')}</textarea>
       <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Produtos apresentados (um por linha)</label>
@@ -6883,9 +6932,11 @@ async function abrirModalEditarEtapaProposta(etapaId){
 
 async function salvarEdicaoEtapaProposta(e, etapaId){
   e.preventDefault();
+  const dias = document.getElementById('edEtDias').value.trim();
   const resultado = await sb.from('proposta_etapas').update({
     nome: document.getElementById('edEtNome').value.trim(),
-    quando: document.getElementById('edEtQuando').value.trim() || null,
+    quando_dias: dias ? Number(dias) : null,
+    quando: textoQuandoPorDias(dias),
     paragrafo: document.getElementById('edEtParagrafo').value.trim() || null,
     nota: document.getElementById('edEtNota').value.trim() || null,
   }).eq('id', etapaId);
@@ -7014,4 +7065,135 @@ async function removerGaleriaProposta(id){
   if(!confirm('Remover essa foto da galeria?')) return;
   await sb.from('proposta_galeria').delete().eq('id', id);
   loadConfigPropostas();
+}
+
+/* ---- Modelos de etapa por tipo (Configurações) ---- */
+window._modeloTipoAtual = window._modeloTipoAtual || 'completo';
+
+function trocarTipoModeloProposta(tipo){
+  window._modeloTipoAtual = tipo;
+  loadModelosEtapasProposta();
+}
+
+async function loadModelosEtapasProposta(){
+  const tipo = window._modeloTipoAtual || 'completo';
+  document.getElementById('btnModeloTipoCompleto').classList.toggle('on', tipo==='completo');
+  document.getElementById('btnModeloTipoConsultoria').classList.toggle('on', tipo==='consultoria');
+  const { data: etapas } = await sb.from('proposta_modelo_etapas')
+    .select('*, proposta_modelo_etapa_produtos(id)')
+    .eq('tipo', tipo).order('ordem');
+  document.getElementById('cfModeloEtapasLista').innerHTML = (etapas||[]).length===0
+    ? '<p class="muted" style="font-size:12.5px;">Nenhuma etapa padrão cadastrada ainda pra esse tipo.</p>'
+    : etapas.map((et,i) => `
+    <div class="linha-item" style="align-items:flex-start;">
+      <div class="linha-txt" style="cursor:pointer;" onclick="abrirModalEditarModeloEtapa('${et.id}')">
+        <p style="font-size:13.5px;font-weight:600;">${i+1}. ${esc(et.nome)}</p>
+        <span>${esc(textoQuandoPorDias(et.quando_dias))}${(et.proposta_modelo_etapa_produtos||[]).length ? ' · ' + et.proposta_modelo_etapa_produtos.length + ' produto(s)' : ''}</span>
+      </div>
+      <div style="display:flex;gap:2px;flex-shrink:0;">
+        <button type="button" class="btn-ghost" title="Mover pra cima" style="padding:4px 7px;" onclick="moverModeloEtapa('${et.id}',-1)">↑</button>
+        <button type="button" class="btn-ghost" title="Mover pra baixo" style="padding:4px 7px;" onclick="moverModeloEtapa('${et.id}',1)">↓</button>
+        <button type="button" class="remove-link" onclick="excluirComConfirmacao('proposta_modelo_etapas','${et.id}','essa etapa padrão', loadModelosEtapasProposta)">excluir</button>
+      </div>
+    </div>`).join('');
+}
+
+async function adicionarModeloEtapa(){
+  const nome = document.getElementById('cfModeloEtapaNome').value.trim();
+  if(!nome) return;
+  const tipo = window._modeloTipoAtual || 'completo';
+  const dias = document.getElementById('cfModeloEtapaDias').value.trim();
+  const { data: existentes } = await sb.from('proposta_modelo_etapas').select('ordem').eq('tipo', tipo).order('ordem',{ascending:false}).limit(1);
+  const proximaOrdem = existentes && existentes[0] ? existentes[0].ordem + 1 : 0;
+  const resultado = await sb.from('proposta_modelo_etapas').insert({
+    tipo, nome, quando_dias: dias ? Number(dias) : null, ordem: proximaOrdem,
+  });
+  if(checarErro(resultado, 'adicionar etapa padrão')) return;
+  document.getElementById('cfModeloEtapaNome').value = '';
+  document.getElementById('cfModeloEtapaDias').value = '';
+  loadModelosEtapasProposta();
+}
+
+async function moverModeloEtapa(etapaId, direcao){
+  const tipo = window._modeloTipoAtual || 'completo';
+  const { data: etapas } = await sb.from('proposta_modelo_etapas').select('id,ordem').eq('tipo', tipo).order('ordem');
+  if(!etapas) return;
+  const i = etapas.findIndex(e => e.id === etapaId);
+  const j = i + direcao;
+  if(i<0 || j<0 || j>=etapas.length) return;
+  await sb.from('proposta_modelo_etapas').update({ ordem: etapas[j].ordem }).eq('id', etapas[i].id);
+  await sb.from('proposta_modelo_etapas').update({ ordem: etapas[i].ordem }).eq('id', etapas[j].id);
+  loadModelosEtapasProposta();
+}
+
+async function abrirModalEditarModeloEtapa(etapaId){
+  const { data: etapa } = await sb.from('proposta_modelo_etapas').select('*, proposta_modelo_etapa_produtos(id,texto,ordem)').eq('id', etapaId).single();
+  if(!etapa) return;
+  const produtosTexto = (etapa.proposta_modelo_etapa_produtos||[]).slice().sort((a,b)=>a.ordem-b.ordem).map(p=>p.texto).join('\n');
+
+  abrirModal(`
+    <p class="label" style="margin-bottom:14px;">Editar etapa padrão</p>
+    <form onsubmit="salvarEdicaoModeloEtapa(event,'${etapaId}')">
+      <div style="display:flex;gap:8px;margin-bottom:6px;">
+        <input id="edMEtNome" required value="${esc(etapa.nome)}" placeholder="Nome da etapa" style="flex:2;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
+        <input id="edMEtDias" type="number" min="0" value="${etapa.quando_dias ?? ''}" placeholder="Dias úteis" title="Dias úteis (0 = início imediato)" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" oninput="document.getElementById('edMEtDiasPreview').textContent = textoQuandoPorDias(this.value)" />
+      </div>
+      <p class="muted" style="font-size:11px;margin:0 0 10px;">Prazo mostrado pro cliente: <b id="edMEtDiasPreview">${esc(textoQuandoPorDias(etapa.quando_dias))}</b> — muda sozinho conforme os dias.</p>
+      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Texto do "saber mais"</label>
+      <textarea id="edMEtParagrafo" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:4px 0 10px;font-family:inherit;">${esc(etapa.paragrafo||'')}</textarea>
+      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Produtos apresentados (um por linha)</label>
+      <textarea id="edMEtProdutos" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:4px 0 10px;font-family:inherit;">${esc(produtosTexto)}</textarea>
+      <label class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);">Aviso / observação (opcional)</label>
+      <textarea id="edMEtNota" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:4px 0 14px;font-family:inherit;">${esc(etapa.nota||'')}</textarea>
+
+      <div class="form-actions">
+        <button type="submit" class="btn">Salvar etapa padrão</button>
+        <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
+      </div>
+    </form>
+  `);
+}
+
+async function salvarEdicaoModeloEtapa(e, etapaId){
+  e.preventDefault();
+  const dias = document.getElementById('edMEtDias').value.trim();
+  const resultado = await sb.from('proposta_modelo_etapas').update({
+    nome: document.getElementById('edMEtNome').value.trim(),
+    quando_dias: dias ? Number(dias) : null,
+    paragrafo: document.getElementById('edMEtParagrafo').value.trim() || null,
+    nota: document.getElementById('edMEtNota').value.trim() || null,
+  }).eq('id', etapaId);
+  if(checarErro(resultado, 'salvar etapa padrão')) return;
+
+  const produtosLinhas = document.getElementById('edMEtProdutos').value.split('\n').map(l=>l.trim()).filter(Boolean);
+  await sb.from('proposta_modelo_etapa_produtos').delete().eq('modelo_etapa_id', etapaId);
+  if(produtosLinhas.length > 0){
+    await sb.from('proposta_modelo_etapa_produtos').insert(produtosLinhas.map((texto,i) => ({ modelo_etapa_id: etapaId, texto, ordem:i })));
+  }
+
+  fecharModalEditar();
+  loadModelosEtapasProposta();
+}
+
+/* ---- Bônus padrão (Configurações) ---- */
+async function loadModelosBonusProposta(){
+  const { data: bonus } = await sb.from('proposta_modelo_bonus').select('*').order('ordem');
+  document.getElementById('cfModeloBonusLista').innerHTML = (bonus||[]).length===0
+    ? '<p class="muted" style="font-size:12.5px;">Nenhum bônus padrão cadastrado ainda.</p>'
+    : bonus.map(x => `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+      <span style="flex:1;font-size:13px;">${esc(x.texto)}</span>
+      <button type="button" class="remove-link" onclick="excluirComConfirmacao('proposta_modelo_bonus','${x.id}','esse bônus padrão', loadModelosBonusProposta)">remover</button>
+    </div>`).join('');
+}
+
+async function adicionarModeloBonus(){
+  const texto = document.getElementById('cfModeloBonusTexto').value.trim();
+  if(!texto) return;
+  const { data: existentes } = await sb.from('proposta_modelo_bonus').select('ordem').order('ordem',{ascending:false}).limit(1);
+  const proximaOrdem = existentes && existentes[0] ? existentes[0].ordem + 1 : 0;
+  const resultado = await sb.from('proposta_modelo_bonus').insert({ texto, ordem: proximaOrdem });
+  if(checarErro(resultado, 'adicionar bônus padrão')) return;
+  document.getElementById('cfModeloBonusTexto').value = '';
+  loadModelosBonusProposta();
 }
