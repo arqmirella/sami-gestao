@@ -151,6 +151,13 @@ async function showApp(){
   // Cria as tarefas das rotinas que estão na hora (silencioso, não trava a tela)
   gerarTarefasRecorrentes().catch(e => console.warn('rotinas:', e));
   gerarDespesasFixas().catch(e => console.warn('despesas fixas:', e));
+  // Atualiza o aviso de cronômetro rodando periodicamente, mesmo sem trocar de tela
+  // (pega o tempo passando e cronômetros que outra pessoa da equipe tenha iniciado)
+  if(!window._intervaloCronometrosGlobais){
+    window._intervaloCronometrosGlobais = setInterval(() => {
+      if(document.getElementById('appScreen').style.display !== 'none') carregarCronometrosGlobais();
+    }, 30000);
+  }
 }
 function showLogin(){
   document.getElementById('appScreen').style.display = 'none';
@@ -161,6 +168,7 @@ function showLogin(){
 const VIEWS = ['inicio','projetos','projeto-detalhe','clientes','cliente-detalhe','propostas','proposta-detalhe','conteudo','financeiro','fornecedores','equipe','config'];
 function navigate(view, opts){
   opts = opts || {};
+  carregarCronometrosGlobais(); // reforça o aviso de cronômetro rodando a cada troca de tela
   VIEWS.forEach(v => document.getElementById('view-'+v).classList.toggle('hidden', v!==view));
   document.querySelectorAll('.navbtn').forEach(b => b.classList.toggle('active', b.dataset.view===view));
 
@@ -1557,6 +1565,18 @@ async function loadTarefas(){
   window._respPorTarefa = respPorTarefa;
   window._tempoAbertoPorTarefa = new Map((temposAbertos||[]).map(t => [t.tarefa_id, t]));
 
+  // Total de tarefas e quantas já estão concluídas em cada etapa (pra agrupar no kanban) —
+  // sempre olhando todas as tarefas da etapa, não só as que passam pelos filtros da tela
+  const etapaTotaisMap = new Map();
+  (tarefas||[]).forEach(t => {
+    if(!t.etapa_id) return;
+    const atual = etapaTotaisMap.get(t.etapa_id) || { total:0, concluidas:0 };
+    atual.total++;
+    if(t.status === 'concluida') atual.concluidas++;
+    etapaTotaisMap.set(t.etapa_id, atual);
+  });
+  window._etapaTotaisMap = etapaTotaisMap;
+
   const ambientesUnicos = new Map();
   (tarefas||[]).forEach(t => { if(t.ambiente_id && t.ambientes?.nome) ambientesUnicos.set(t.ambiente_id, t.ambientes.nome); });
   const selAmbiente = document.getElementById('filtroAmbienteTarefas');
@@ -1650,9 +1670,43 @@ function renderKanbanTarefas(){
   const tarefasVisiveis = tarefasFiltradas();
   const respPorTarefa = window._respPorTarefa || new Map();
   const tempoAbertoPorTarefa = window._tempoAbertoPorTarefa || new Map();
+  const etapaTotaisMap = window._etapaTotaisMap || new Map();
 
   document.getElementById('kanbanTarefas').innerHTML = STATUS_TAREFA.map(col => {
     const itens = tarefasVisiveis.filter(t => t.status===col.status);
+
+    // Tarefas com etapa se juntam num card compacto por etapa; sem etapa (Escritório
+    // ou soltas no projeto) continuam cada uma como card individual, do jeito que já era.
+    const gruposEtapa = new Map();
+    const individuais = [];
+    itens.forEach(t => {
+      if(t.etapa_id){
+        if(!gruposEtapa.has(t.etapa_id)){
+          gruposEtapa.set(t.etapa_id, {
+            etapaId: t.etapa_id,
+            etapaNome: window._etapaNomeGlobalMap?.get(t.etapa_id) || 'Etapa',
+            projetoId: t.projeto_id,
+            projetoNome: t.projetos?.nome || '',
+            nessaColuna: 0,
+          });
+        }
+        gruposEtapa.get(t.etapa_id).nessaColuna++;
+      } else {
+        individuais.push(t);
+      }
+    });
+
+    const cardsEtapa = Array.from(gruposEtapa.values()).map(g => {
+      const totais = etapaTotaisMap.get(g.etapaId) || { total:g.nessaColuna, concluidas:0 };
+      const pct = totais.total ? Math.round(totais.concluidas/totais.total*100) : 0;
+      return `<div class="task-card etapa-compacta" onclick="abrirModalEtapaTarefas('${g.etapaId}')">
+        <p class="label" style="margin-bottom:2px;">${esc(g.projetoNome)}</p>
+        <p class="task-title" style="margin-bottom:8px;">${esc(g.etapaNome)}</p>
+        <div class="bar" style="margin-bottom:4px;"><div style="width:${pct}%"></div></div>
+        <p class="barcaption" style="margin:0;">☑ ${totais.concluidas}/${totais.total} concluídas no total · ${g.nessaColuna} aqui</p>
+      </div>`;
+    }).join('');
+
     return `<div class="kanban-col" ondragover="dragOverColuna(event,this)" ondragleave="this.classList.remove('drag-over')" ondrop="dropColuna(event,'${col.status}',this)">
       <div class="col-header">
         <span class="col-dot ${DOT_CLASS[col.status]}"></span>
@@ -1660,7 +1714,8 @@ function renderKanbanTarefas(){
         <span class="col-count">${itens.length}</span>
       </div>
       ${itens.length===0 ? '<p class="muted" style="font-size:13px;padding:4px;">Nenhuma tarefa aqui.</p>' : ''}
-      ${itens.map(t => {
+      ${cardsEtapa}
+      ${individuais.map(t => {
         const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
         const resp = respPorTarefa.get(t.id) || [];
         const tempoAberto = tempoAbertoPorTarefa.get(t.id);
@@ -1738,7 +1793,7 @@ function dragOverColuna(e, col){
 
 /* Descobre sobre qual card o ponteiro está, pra saber onde inserir */
 function cardSobOPonteiro(col, y){
-  const cards = [...col.querySelectorAll('.task-card:not(.dragging)')];
+  const cards = [...col.querySelectorAll('.task-card:not(.dragging):not(.etapa-compacta)')];
   for(const card of cards){
     const caixa = card.getBoundingClientRect();
     if(y < caixa.top + caixa.height/2) return card;
@@ -1874,6 +1929,75 @@ async function moverTarefaKanban(id, status){
 async function excluirTarefaKanban(id){
   await excluirComConfirmacao('tarefas', id, 'essa tarefa', () => loadTarefas());
 }
+
+/* ---- Card compacto de etapa no kanban de Tarefas: abre a lista completa em modal ---- */
+async function abrirModalEtapaTarefas(etapaId){
+  const [{ data: tarefas }, { data: etapa }, { data: responsaveis }] = await Promise.all([
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,concluida_em,ambientes(nome)').eq('etapa_id', etapaId).eq('arquivada', false).order('criado_em',{ascending:true}),
+    sb.from('etapas').select('id,nome,projeto_id,projetos(nome)').eq('id', etapaId).single(),
+    sb.from('tarefas_responsaveis').select('tarefa_id,equipe(nome)'),
+  ]);
+  if(!etapa) return;
+
+  const respPorTarefa = new Map();
+  (responsaveis||[]).forEach(r => {
+    if(!r.equipe?.nome) return;
+    const atual = respPorTarefa.get(r.tarefa_id) || [];
+    atual.push(r.equipe.nome);
+    respPorTarefa.set(r.tarefa_id, atual);
+  });
+
+  const lista = tarefas || [];
+  const feitas = lista.filter(t => t.status === 'concluida');
+  const pct = lista.length ? Math.round(feitas.length / lista.length * 100) : 0;
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+
+  const linha = t => {
+    const resp = respPorTarefa.get(t.id) || [];
+    const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
+    return `<div class="checklist-item" style="flex-wrap:wrap;">
+      <input type="checkbox" ${t.status==='concluida'?'checked':''} onchange="toggleTarefaModalEtapa('${t.id}','${etapaId}', this.checked)" />
+      <span class="${t.status==='concluida'?'done':''}" style="flex:1;min-width:120px;">${esc(t.titulo)}</span>
+      ${t.ambientes?.nome ? `<span class="badge line">${esc(t.ambientes.nome)}</span>` : ''}
+      ${resp.map(n => `<span class="badge line">${esc(n)}</span>`).join('')}
+      ${atrasada ? '<span class="badge alert">Atrasada</span>' : ''}
+      ${t.prazo ? `<span class="mono" style="font-size:11px;color:var(--graphite);">${fmtDataBR(t.prazo)}</span>` : ''}
+      <button class="edit-link" onclick="abrirModalEditarTarefa('${t.id}')">editar</button>
+      <button class="remove-link" onclick="excluirTarefaModalEtapa('${t.id}','${etapaId}')">×</button>
+    </div>`;
+  };
+
+  abrirModal(`
+    <p class="mono" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--graphite);margin:0 0 2px;">${esc(etapa.projetos?.nome||'')}</p>
+    <p class="label" style="margin-bottom:10px;font-size:17px;">${esc(etapa.nome)}</p>
+    <div class="bar" style="margin-bottom:4px;"><div style="width:${pct}%"></div></div>
+    <p class="barcaption" style="margin:0 0 16px;">${feitas.length}/${lista.length} concluídas</p>
+    <div style="max-height:400px;overflow-y:auto;margin-bottom:6px;">
+      ${lista.length===0 ? '<p class="muted" style="font-size:12.5px;">Nenhuma tarefa nessa etapa ainda.</p>' : lista.map(linha).join('')}
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;" onclick="fecharModalEditar();navigate('projeto-detalhe',{projetoId:'${etapa.projeto_id}',aba:'etapas'});">Abrir etapa no projeto</button>
+      <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Fechar</button>
+    </div>
+  `);
+}
+
+async function toggleTarefaModalEtapa(tarefaId, etapaId, marcado){
+  const resultado = await sb.from('tarefas').update({
+    status: marcado ? 'concluida' : 'pendente',
+    concluida_em: marcado ? new Date().toISOString() : null,
+  }).eq('id', tarefaId);
+  if(checarErro(resultado, 'atualizar tarefa')) return;
+  await loadTarefas();
+  abrirModalEtapaTarefas(etapaId);
+}
+
+async function excluirTarefaModalEtapa(tarefaId, etapaId){
+  const excluiu = await excluirComConfirmacao('tarefas', tarefaId, 'essa tarefa', null);
+  if(!excluiu) return;
+  await loadTarefas();
+  abrirModalEtapaTarefas(etapaId);
+}
 async function iniciarCronometro(tarefaId){
   const sel = document.getElementById('sel-eq-'+tarefaId);
   const equipeId = sel ? sel.value : null;
@@ -1891,6 +2015,7 @@ async function iniciarCronometro(tarefaId){
   const r = await sb.from('tarefas').update({ ordem_manual: -Date.now() }).eq('id', tarefaId);
   if(checarErro(r, 'reordenar tarefa')) return;
   loadTarefas();
+  carregarCronometrosGlobais();
 }
 async function trazerTarefaParaTopo(tarefaId){
   await sb.from('tarefas').update({ ordem_manual: -Date.now() }).eq('id', tarefaId);
@@ -1900,6 +2025,7 @@ async function pararCronometro(tempoId){
   const resultado = await sb.from('tarefas_tempo').update({ fim: new Date().toISOString() }).eq('id', tempoId);
   if(checarErro(resultado, 'parar cronômetro')) return;
   loadTarefas();
+  carregarCronometrosGlobais();
 }
 
 /* ================= FINANCEIRO ================= */
@@ -6457,12 +6583,62 @@ async function iniciarCronometroEtapa(etapaId){
   });
   if(checarErro(resultado, 'iniciar cronômetro da etapa')) return;
   loadProjetoDetalhe(projetoAtualId);
+  carregarCronometrosGlobais();
 }
 
 async function pararCronometroEtapa(tempoId){
   const resultado = await sb.from('tarefas_tempo').update({ fim: new Date().toISOString() }).eq('id', tempoId);
   if(checarErro(resultado, 'parar cronômetro')) return;
   loadProjetoDetalhe(projetoAtualId);
+  carregarCronometrosGlobais();
+}
+
+/* ---- Aviso global de cronômetro rodando (aparece em qualquer tela) ---- */
+async function carregarCronometrosGlobais(){
+  const cont = document.getElementById('cronometroGlobalAviso');
+  if(!cont) return;
+  const { data: rodando } = await sb.from('tarefas_tempo')
+    .select('id,etapa_id,tarefa_id,inicio,equipe(nome),etapas(nome,projeto_id,projetos(nome)),tarefas(titulo,projeto_id,projetos(nome))')
+    .is('fim', null)
+    .order('inicio');
+  window._cronometrosGlobaisAbertos = rodando || [];
+  renderCronometrosGlobais();
+}
+
+function renderCronometrosGlobais(){
+  const cont = document.getElementById('cronometroGlobalAviso');
+  if(!cont) return;
+  const rodando = window._cronometrosGlobaisAbertos || [];
+  if(rodando.length === 0){
+    cont.classList.add('hidden');
+    cont.innerHTML = '';
+    return;
+  }
+  cont.classList.remove('hidden');
+  cont.innerHTML = `
+    <div class="cron-global">
+      <p class="cron-global-titulo"><span class="timer-dot" style="background:var(--alert);animation:timerPulse 1.4s ease-in-out infinite;"></span>${rodando.length>1 ? rodando.length+' cronômetros rodando' : 'Cronômetro rodando'} — não esquece de parar antes de sair</p>
+      ${rodando.map(r => {
+        const projeto = r.etapas?.projetos?.nome || r.tarefas?.projetos?.nome || '';
+        const onde = r.etapas ? `etapa <b>${esc(r.etapas.nome)}</b>` : r.tarefas ? `tarefa <b>${esc(r.tarefas.titulo)}</b>` : 'tempo';
+        const projetoId = r.etapas?.projeto_id || r.tarefas?.projeto_id || null;
+        const minutos = Math.max(0, Math.round((Date.now() - new Date(r.inicio).getTime())/60000));
+        const decorrido = minutos < 60 ? `${minutos} min` : `${Math.floor(minutos/60)}h${String(minutos%60).padStart(2,'0')}`;
+        return `<div class="cron-global-item">
+          <span class="cron-global-txt"><b>${esc(r.equipe?.nome||'')}</b> em ${onde}${projeto?' · '+esc(projeto):''} — ${decorrido}</span>
+          ${projetoId ? `<button type="button" class="btn-ghost" style="font-size:11.5px;padding:2px 6px;text-decoration:underline;" onclick="navigate('projeto-detalhe',{projetoId:'${projetoId}'})">Abrir</button>` : ''}
+          <button type="button" class="timer-stop" onclick="pararCronometroGlobal('${r.id}')">■ Parar</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+async function pararCronometroGlobal(tempoId){
+  const resultado = await sb.from('tarefas_tempo').update({ fim: new Date().toISOString() }).eq('id', tempoId);
+  if(checarErro(resultado, 'parar cronômetro')) return;
+  carregarCronometrosGlobais();
+  if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
+  loadTarefas();
 }
 
 /* ================= CONCLUIR PROJETO ================= */
