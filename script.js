@@ -188,7 +188,7 @@ function navigate(view, opts){
   if(view==='financeiro') trocarAbaFinanceiro(subaba);
   if(view==='fornecedores') loadFornecedores();
   if(view==='equipe') loadEquipe();
-  if(view==='config'){ loadConfiguracoes(); loadConfigPropostas(); loadModelosEtapasProposta(); loadModelosBonusProposta(); }
+  if(view==='config'){ loadConfiguracoes(); loadConfigPropostas(); loadModelosEtapasProposta(); loadModelosBonusProposta(); loadSocios(); }
   if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId, opts.aba);
   if(view==='cliente-detalhe' && opts.clienteId) loadClienteDetalhe(opts.clienteId);
   if(view==='proposta-detalhe' && opts.propostaId) loadPropostaDetalhe(opts.propostaId);
@@ -320,7 +320,7 @@ async function preencherSelectProjetos(...selectIds){
   selectIds.forEach(id => {
     const el = document.getElementById(id);
     if(!el) return;
-    const opcaoVazia = el.dataset.opcional === 'true' ? '<option value="">Sem projeto vinculado</option>' : '';
+    const opcaoVazia = el.dataset.opcional === 'true' ? `<option value="">${esc(el.dataset.textoVazio || 'Sem projeto vinculado')}</option>` : '';
     el.innerHTML = opcaoVazia + (projetos||[]).map(p => `<option value="${p.id}">${esc(p.nome)}</option>`).join('');
   });
 }
@@ -462,6 +462,12 @@ function renderTarefasHoje(tarefas){
     andamento:  tarefas.filter(t => t.status === 'em_andamento'),
   };
 
+  // Tarefa avulsa/aleatória (sem prazo, ou com prazo bem lá na frente) não caía em
+  // nenhuma aba acima e sumia da tela Início mesmo estando no kanban — essa aba
+  // pega tudo que sobrou, pra nenhuma tarefa ficar invisível por aqui.
+  const jaMostradas = new Set([...grupos.hoje, ...grupos.atrasadas, ...grupos.semana, ...grupos.andamento].map(t => t.id));
+  grupos.outras = tarefas.filter(t => !jaMostradas.has(t.id));
+
   // Atualiza os contadores das abas
   const setCont = (id, n) => {
     const el = document.getElementById(id);
@@ -471,12 +477,14 @@ function renderTarefasHoje(tarefas){
   setCont('contFocoAtrasadas', grupos.atrasadas.length);
   setCont('contFocoSemana', grupos.semana.length);
   setCont('contFocoAndamento', grupos.andamento.length);
+  setCont('contFocoOutras', grupos.outras.length);
 
   const vazios = {
     hoje: 'Nenhuma tarefa com prazo pra hoje.',
     atrasadas: 'Nenhuma tarefa atrasada.',
     semana: 'Nada vencendo nos próximos 7 dias.',
     andamento: 'Nenhuma tarefa em andamento agora.',
+    outras: 'Nenhuma outra tarefa em aberto.',
   };
 
   const lista = grupos[abaFocoAtual] || [];
@@ -960,6 +968,9 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
             <button class="remove-link" onclick="excluirEtapa('${et.id}')">remover</button>
           </div>
         </div>
+
+        ${renderCronometroEtapa(et)}
+
         <div class="bar" style="margin:10px 0 4px;"><div style="width:${ex.percentual_execucao}%"></div></div>
         <p class="barcaption" style="margin:0 0 8px;">${ex.percentual_execucao}% concluído${ex.total_tarefas?` · ${ex.total_tarefas} tarefas`:''}</p>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
@@ -969,8 +980,6 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
           ${bloqueio ? `<span class="badge alert">Depende de: ${esc(bloqueio)}</span>` : ''}
         </div>
         ${et.resumo ? `<p style="font-size:12.5px;color:var(--graphite);margin:0 0 8px;">${esc(et.resumo)}</p>` : ''}
-
-        ${renderCronometroEtapa(et)}
 
         <div style="border-top:1px solid var(--line);padding-top:10px;margin-top:4px;">
           <p class="mono" style="font-size:11.5px;text-transform:uppercase;color:var(--graphite);margin:0 0 8px;">Checklist</p>
@@ -1518,7 +1527,10 @@ let filtroAmbienteAtual = 'todos';
 let visaoTarefaAtual = 'kanban';
 
 async function loadTarefas(){
-  document.getElementById('ntProjeto').dataset.opcional = 'false';
+  // "true" preserva a opção "Tarefa do escritório (sem projeto)" no seletor —
+  // sem isso, toda tarefa criada aqui sem querer ia parar dentro do primeiro
+  // projeto da lista (em ordem alfabética) e sumia do painel de tarefas do escritório.
+  document.getElementById('ntProjeto').dataset.opcional = 'true';
   await preencherSelectProjetos('ntProjeto');
 
   const { data: equipe } = await sb.from('equipe').select('id,nome').eq('ativo', true).order('nome');
@@ -1530,7 +1542,7 @@ async function loadTarefas(){
   const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }, { data: todasEtapas }, { data: temposFechados }] = await Promise.all([
     sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,data_inicio,projeto_id,etapa_id,ambiente_id,ordem_manual,concluida_em,criado_em,projetos(nome),ambientes(nome)').eq('arquivada', false).order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id,equipe(nome)'),
-    sb.from('tarefas_tempo').select('id,tarefa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
+    sb.from('tarefas_tempo').select('id,tarefa_id,etapa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
     sb.from('etapas').select('id,nome,data_fim'),
     sb.from('tarefas_tempo').select('tarefa_id,duracao_segundos').not('duracao_segundos','is',null),
   ]);
@@ -1563,7 +1575,16 @@ async function loadTarefas(){
 
   window._tarefas = tarefas || [];
   window._respPorTarefa = respPorTarefa;
-  window._tempoAbertoPorTarefa = new Map((temposAbertos||[]).map(t => [t.tarefa_id, t]));
+  window._tempoAbertoPorTarefa = new Map((temposAbertos||[]).filter(t => t.tarefa_id).map(t => [t.tarefa_id, t]));
+
+  // Cronômetros de etapa rodando agora (podem ter mais de uma pessoa na mesma etapa)
+  const tempoAbertoPorEtapa = new Map();
+  (temposAbertos||[]).filter(t => t.etapa_id).forEach(t => {
+    const atual = tempoAbertoPorEtapa.get(t.etapa_id) || [];
+    atual.push(t);
+    tempoAbertoPorEtapa.set(t.etapa_id, atual);
+  });
+  window._tempoAbertoPorEtapa = tempoAbertoPorEtapa;
 
   // Total de tarefas e quantas já estão concluídas em cada etapa (pra agrupar no kanban) —
   // sempre olhando todas as tarefas da etapa, não só as que passam pelos filtros da tela
@@ -1670,7 +1691,9 @@ function renderKanbanTarefas(){
   const tarefasVisiveis = tarefasFiltradas();
   const respPorTarefa = window._respPorTarefa || new Map();
   const tempoAbertoPorTarefa = window._tempoAbertoPorTarefa || new Map();
+  const tempoAbertoPorEtapa = window._tempoAbertoPorEtapa || new Map();
   const etapaTotaisMap = window._etapaTotaisMap || new Map();
+  const equipeAtiva = window._equipeAtiva || [];
 
   document.getElementById('kanbanTarefas').innerHTML = STATUS_TAREFA.map(col => {
     const itens = tarefasVisiveis.filter(t => t.status===col.status);
@@ -1699,10 +1722,41 @@ function renderKanbanTarefas(){
     const cardsEtapa = Array.from(gruposEtapa.values()).map(g => {
       const totais = etapaTotaisMap.get(g.etapaId) || { total:g.nessaColuna, concluidas:0 };
       const pct = totais.total ? Math.round(totais.concluidas/totais.total*100) : 0;
+      const rodando = tempoAbertoPorEtapa.get(g.etapaId) || [];
+
+      // Pra não precisar abrir o projeto: um play direto no card pra cronometrar a etapa.
+      // Rodando, mostra quem tá nela e um jeito de parar; parado, um play que revela
+      // rapidinho o "quem vai trabalhar" antes de começar a contar.
+      const indicador = rodando.length > 0
+        ? `<span class="timer-dot" style="background:var(--alert);animation:timerPulse 1.4s ease-in-out infinite;" title="Cronômetro rodando"></span>`
+        : `<button type="button" class="timer-go-icon" title="Iniciar cronômetro dessa etapa" onclick="this.closest('.task-card').querySelector('.cron-kanban-picker').classList.toggle('hidden')">▶</button>`;
+
+      const linhaExtra = rodando.length > 0
+        ? `<div class="cron-kanban-rodando" onclick="event.stopPropagation()">
+            ${rodando.map(r => `
+              <div class="cron-rodando-mini">
+                <span class="cron-rodando-txt"><b>${esc(r.equipe?.nome||'')}</b> desde ${new Date(r.inicio).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
+                <button type="button" class="timer-stop" onclick="pararCronometroEtapa('${r.id}')">■ Parar</button>
+              </div>`).join('')}
+          </div>`
+        : `<div class="cron-kanban-picker hidden" onclick="event.stopPropagation()">
+            <select class="timer-select">
+              <option value="">Quem vai trabalhar?</option>
+              ${equipeAtiva.map(m => `<option value="${m.id}">${esc(m.nome)}</option>`).join('')}
+            </select>
+            <button type="button" class="timer-go" onclick="iniciarCronometroEtapaKanban('${g.etapaId}', this)">▶ Iniciar</button>
+          </div>`;
+
       return `<div class="task-card etapa-compacta" onclick="abrirModalEtapaTarefas('${g.etapaId}')">
-        <p class="label" style="margin-bottom:2px;">${esc(g.projetoNome)}</p>
-        <p class="task-title" style="margin-bottom:8px;">${esc(g.etapaNome)}</p>
-        <div class="bar" style="margin-bottom:4px;"><div style="width:${pct}%"></div></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <p class="label" style="margin-bottom:2px;">${esc(g.projetoNome)}</p>
+            <p class="task-title" style="margin-bottom:0;">${esc(g.etapaNome)}</p>
+          </div>
+          <div onclick="event.stopPropagation()">${indicador}</div>
+        </div>
+        ${linhaExtra}
+        <div class="bar" style="margin:8px 0 4px;"><div style="width:${pct}%"></div></div>
         <p class="barcaption" style="margin:0;">☑ ${totais.concluidas}/${totais.total} concluídas no total · ${g.nessaColuna} aqui</p>
       </div>`;
     }).join('');
@@ -2045,9 +2099,8 @@ function trocarAbaFinanceiro(tab){
   document.querySelectorAll('.fin-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'fintab-'+tab));
   document.querySelectorAll('.fin-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
   if(tab==='visao') loadFluxoCaixa();
-  if(tab==='receber') loadContasReceber();
+  if(tab==='receber') loadEntradas();
   if(tab==='despesas') loadDespesas();
-  if(tab==='comissoes') loadComissoesRT();
   if(tab==='projetos') loadFinanceiroPorProjeto();
 }
 
@@ -2096,24 +2149,45 @@ function statusEfetivoGenerico(item){
 async function loadFluxoCaixa(){
   await ensureChartJs();
   renderPainelHoje();
-  const [{ data: parcelas }, { data: despesas }, { data: configData }] = await Promise.all([
+  const [{ data: parcelas }, { data: despesas }, { data: comissoes }, { data: configData }, { data: socios }] = await Promise.all([
     sb.from('financeiro_parcelas').select('valor,vencimento,status'),
     sb.from('despesas').select('valor,vencimento,status'),
+    sb.from('comissoes_rt').select('valor,status,data_recebimento'),
     sb.from('config_financeiro').select('meta_mensal').eq('id', 1).maybeSingle(),
+    sb.from('socios').select('*').order('ordem'),
   ]);
   const metaMensal = Number(configData?.meta_mensal || 0);
   window._metaMensalAtual = metaMensal;
 
+  // Cards do topo (Entradas/Saídas/Saldo/Divisão por sócia) respeitam o filtro de
+  // período escolhido ali em cima — diferente do histórico mensal mais abaixo,
+  // que mostra sempre a linha do tempo completa.
+  const parcelasPeriodo = filtrarPorPeriodo(parcelas||[], 'vencimento');
+  const despesasPeriodo = filtrarPorPeriodo(despesas||[], 'vencimento');
+  const comissoesRecebidasPeriodo = filtrarPorPeriodo((comissoes||[]).filter(c=>c.status==='recebido'), 'data_recebimento');
+
   let entradas = 0;
-  (parcelas||[]).forEach(p => { if(statusEfetivoGenerico(p)==='pago') entradas += Number(p.valor); });
+  parcelasPeriodo.forEach(p => { if(statusEfetivoGenerico(p)==='pago') entradas += Number(p.valor); });
+  comissoesRecebidasPeriodo.forEach(c => { entradas += Number(c.valor); });
   let saidas = 0;
-  (despesas||[]).forEach(d => { if(statusEfetivoGenerico(d)==='pago') saidas += Number(d.valor); });
+  despesasPeriodo.forEach(d => { if(statusEfetivoGenerico(d)==='pago') saidas += Number(d.valor); });
   const saldo = entradas - saidas;
 
   document.getElementById('fluxoResumo').innerHTML = `
     <div class="card"><p class="label">Entradas (recebido)</p><p style="font-size:20px;font-weight:600;color:${CORES.pago};">${fmtMoeda(entradas)}</p></div>
     <div class="card"><p class="label">Saídas (pago)</p><p style="font-size:20px;font-weight:600;color:${CORES.atrasado};">${fmtMoeda(saidas)}</p></div>
     <div class="card"><p class="label">Saldo</p><p style="font-size:20px;font-weight:600;color:${saldo>=0?CORES.pago:CORES.atrasado};">${fmtMoeda(saldo)}</p></div>`;
+
+  document.getElementById('blocoDivisaoSocios').innerHTML = (socios||[]).length===0
+    ? '<p class="muted" style="margin:0;">Nenhuma sócia cadastrada ainda — configure em Configurações → Divisão financeira.</p>'
+    : `<div class="grid" style="grid-template-columns:repeat(${socios.length},1fr);gap:14px;">
+        ${socios.map(s => `
+          <div>
+            <p class="mono" style="font-size:11px;text-transform:uppercase;color:var(--graphite);margin:0 0 4px;">${esc(s.nome)} · ${s.percentual}%</p>
+            <p style="font-size:19px;font-weight:600;font-family:'Space Grotesk',sans-serif;margin:0;color:var(--terracotta);">${fmtMoeda(entradas * (Number(s.percentual)/100))}</p>
+          </div>`).join('')}
+      </div>
+      <p class="muted" style="font-size:11.5px;margin:12px 0 0;">Metade de tudo que entrou (honorários + comissões) no período selecionado ali em cima.</p>`;
 
   const meses = new Map();
   const addAoMes = (dataStr, campo, valor) => {
@@ -2125,6 +2199,7 @@ async function loadFluxoCaixa(){
     meses.set(chave, atual);
   };
   (parcelas||[]).forEach(p => { if(statusEfetivoGenerico(p)==='pago') addAoMes(p.vencimento, 'entradas', Number(p.valor)); });
+  (comissoes||[]).forEach(c => { if(c.status==='recebido' && c.data_recebimento) addAoMes(c.data_recebimento, 'entradas', Number(c.valor)); });
   (despesas||[]).forEach(d => { if(statusEfetivoGenerico(d)==='pago') addAoMes(d.vencimento, 'saidas', Number(d.valor)); });
 
   const dadosMeses = Array.from(meses.entries()).sort(([a],[b]) => a.localeCompare(b)).map(([chave,v]) => ({ chave, ...v }));
@@ -2177,60 +2252,82 @@ async function editarMetaMensal(){
   loadFluxoCaixa();
 }
 
-async function loadContasReceber(){
+let filtroTipoEntradaAtual = 'todas';
+
+function filtrarTipoEntrada(tipo){
+  filtroTipoEntradaAtual = tipo;
+  document.querySelectorAll('#filtroTipoEntrada button').forEach(b => b.classList.toggle('on', b.dataset.tipo===tipo));
+  renderEntradas();
+}
+
+/* Honorários de projeto (financeiro_parcelas) e comissões RT juntos numa única
+   lista — cada lançamento carrega um "tipo" pra poder filtrar/exibir os dois
+   juntos ou separados, sem duplicar tabela, resumo ou gráficos. */
+async function loadEntradas(){
   await ensureChartJs();
   document.getElementById('fgProjeto').dataset.opcional = 'false';
-  await preencherSelectProjetos('fgProjeto');
+  document.getElementById('crProjeto').dataset.opcional = 'true';
+  await preencherSelectProjetos('fgProjeto', 'crProjeto');
 
-  const { data: parcelas } = await sb
-    .from('financeiro_parcelas')
-    .select('id,descricao,valor,vencimento,status,forma_pagamento,data_pagamento,projeto_id,projetos(nome,clientes(nome_completo))')
-    .order('vencimento', { ascending: true });
-  window._parcelas = filtrarPorPeriodo(parcelas || [], 'vencimento');
+  const [{ data: parcelas }, { data: comissoes }, { data: fornecedores }] = await Promise.all([
+    sb.from('financeiro_parcelas').select('id,descricao,valor,vencimento,status,forma_pagamento,data_pagamento,projeto_id,projetos(nome,clientes(nome_completo))').order('vencimento', { ascending: true }),
+    sb.from('comissoes_rt').select('*, projetos(nome), fornecedores(nome)').order('data_prevista',{ascending:true,nullsFirst:false}),
+    sb.from('fornecedores').select('id,nome').order('nome'),
+  ]);
+
+  document.getElementById('crFornecedor').innerHTML = '<option value="">Sem fornecedor vinculado</option>' +
+    (fornecedores||[]).map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('');
+
+  const honorarios = (parcelas||[]).map(p => ({
+    tipo: 'honorario',
+    id: p.id,
+    descricao: p.descricao || 'Parcela',
+    projetoNome: p.projetos?.nome || '',
+    data: p.vencimento,
+    valor: Number(p.valor),
+    status: statusEfetivo(p),
+  }));
+  const comissoesTagged = (comissoes||[]).map(c => ({
+    tipo: 'comissao',
+    id: c.id,
+    descricao: (c.descricao || 'Comissão') + (c.fornecedores?.nome ? ` · ${c.fornecedores.nome}` : ''),
+    projetoNome: c.projetos?.nome || '',
+    data: c.data_recebimento || c.data_prevista,
+    valor: Number(c.valor),
+    status: c.status==='recebido' ? 'pago' : 'pendente',
+  }));
+
+  window._entradasTodas = [...honorarios, ...comissoesTagged];
+  renderEntradas();
+}
+
+function renderEntradas(){
+  const todas = window._entradasTodas || [];
+  const porTipo = filtroTipoEntradaAtual==='todas' ? todas : todas.filter(item => item.tipo===filtroTipoEntradaAtual);
+  const lista = filtrarPorPeriodo(porTipo, 'data');
 
   let recebido=0, pendente=0, atrasado=0;
-  window._parcelas.forEach(p => {
-    const s = statusEfetivo(p);
-    if(s==='pago') recebido += Number(p.valor);
-    else if(s==='atrasado') atrasado += Number(p.valor);
-    else pendente += Number(p.valor);
+  lista.forEach(item => {
+    if(item.status==='pago') recebido += item.valor;
+    else if(item.status==='atrasado') atrasado += item.valor;
+    else pendente += item.valor;
   });
   const total = recebido+pendente+atrasado;
 
   document.getElementById('financeiroResumo').innerHTML = `
-    <div class="card"><p class="label">Total geral</p><p style="font-size:18px;font-weight:600;">${fmtMoeda(total)}</p></div>
+    <div class="card"><p class="label">Total no período</p><p style="font-size:18px;font-weight:600;">${fmtMoeda(total)}</p></div>
     <div class="card"><p class="label">Recebido</p><p style="font-size:18px;font-weight:600;color:${CORES.pago};">${fmtMoeda(recebido)}</p></div>
     <div class="card"><p class="label">Pendente</p><p style="font-size:18px;font-weight:600;color:${CORES.pendente};">${fmtMoeda(pendente)}</p></div>
     <div class="card"><p class="label">Atrasado</p><p style="font-size:18px;font-weight:600;color:${CORES.atrasado};">${fmtMoeda(atrasado)}</p></div>`;
 
-  document.getElementById('tabelaParcelas').innerHTML = window._parcelas.length===0
-    ? '<tr><td colspan="5" class="muted">Nenhuma parcela lançada ainda.</td></tr>'
-    : window._parcelas.map(p => {
-      const s = statusEfetivo(p);
-      return `<tr>
-        <td><p style="margin:0;">${esc(p.descricao||'Parcela')}</p><p style="margin:2px 0 0;font-size:12px;color:var(--graphite);">${esc(p.projetos?.nome||'')}</p></td>
-        <td>${fmtDataBR(p.vencimento)}</td>
-        <td>${fmtMoeda(p.valor)}</td>
-        <td>${s==='pago'
-          ? `<span class="pill" style="color:${CORES.pago};border-color:${CORES.pago};">Pago</span> <button class="edit-link" onclick="imprimirRecibo('${p.id}')">recibo</button>`
-          : `<button class="pill" style="color:${CORES[s]};border-color:${CORES[s]};" onclick="marcarParcelaPaga('${p.id}')">${s==='atrasado'?'Atrasado':'Pendente'} · marcar pago</button>`}
-        </td>
-        <td><button class="remove-link" onclick="excluirParcelaGlobal('${p.id}')">remover</button></td>
-      </tr>`;
-    }).join('');
-
-  renderGraficosFinanceiro();
-}
-
-function renderGraficosFinanceiro(){
   const meses = new Map();
-  window._parcelas.forEach(p => {
-    const d = new Date(p.vencimento+'T00:00:00');
+  lista.forEach(item => {
+    if(!item.data) return;
+    const d = new Date(item.data+'T00:00:00');
     const chave = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     const label = d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
     const atual = meses.get(chave) || { mes: label, pago:0, pendente:0, atrasado:0 };
-    const s = statusEfetivo(p);
-    atual[s] += Number(p.valor);
+    atual[item.status] += item.valor;
     meses.set(chave, atual);
   });
   const dadosMensais = Array.from(meses.entries()).sort(([a],[b]) => a.localeCompare(b)).map(([,v]) => v);
@@ -2247,15 +2344,37 @@ function renderGraficosFinanceiro(){
     options:{responsive:true, plugins:{legend:{labels:{font:{size:11}}}}, scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,grid:{color:'#EFEAE1'}}}}
   });
 
-  let recebido=0,pendente=0,atrasado=0;
-  window._parcelas.forEach(p => { const s=statusEfetivo(p); if(s==='pago')recebido+=Number(p.valor); else if(s==='atrasado')atrasado+=Number(p.valor); else pendente+=Number(p.valor); });
-
   if(charts.status) charts.status.destroy();
   charts.status = new Chart(document.getElementById('chartStatus'), {
     type:'doughnut',
     data:{ labels:['Recebido','Pendente','Atrasado'], datasets:[{ data:[recebido,pendente,atrasado], backgroundColor:[CORES.pago,CORES.pendente,CORES.atrasado] }]},
     options:{plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}}
   });
+
+  document.getElementById('tabelaEntradas').innerHTML = lista.length===0
+    ? '<tr><td colspan="6" class="muted">Nenhuma entrada lançada ainda.</td></tr>'
+    : lista.map(item => {
+      const tipoLabel = item.tipo==='honorario' ? 'Honorário' : 'Comissão RT';
+      let acao;
+      if(item.status==='pago'){
+        acao = item.tipo==='honorario'
+          ? `<span class="pill" style="color:${CORES.pago};border-color:${CORES.pago};">Pago</span> <button class="edit-link" onclick="imprimirRecibo('${item.id}')">recibo</button>`
+          : `<span class="pill" style="color:${CORES.pago};border-color:${CORES.pago};">Recebido</span>`;
+      } else {
+        const marcarFn = item.tipo==='honorario' ? `marcarParcelaPaga('${item.id}')` : `marcarComissaoRecebida('${item.id}')`;
+        const marcarLabel = item.tipo==='honorario' ? 'pago' : 'recebida';
+        acao = `<button class="pill" style="color:${CORES[item.status]};border-color:${CORES[item.status]};" onclick="${marcarFn}">${item.status==='atrasado'?'Atrasado':'Pendente'} · marcar ${marcarLabel}</button>`;
+      }
+      const removerFn = item.tipo==='honorario' ? `excluirParcelaGlobal('${item.id}')` : `excluirComissaoRT('${item.id}')`;
+      return `<tr>
+        <td><p style="margin:0;">${esc(item.descricao)}</p><p style="margin:2px 0 0;font-size:12px;color:var(--graphite);">${esc(item.projetoNome)}</p></td>
+        <td style="font-size:12.5px;">${tipoLabel}</td>
+        <td>${item.data ? fmtDataBR(item.data) : '—'}</td>
+        <td>${fmtMoeda(item.valor)}</td>
+        <td>${acao}</td>
+        <td><button class="remove-link" onclick="${removerFn}">remover</button></td>
+      </tr>`;
+    }).join('');
 }
 
 async function criarParcelaGlobal(e){
@@ -2274,15 +2393,15 @@ async function criarParcelaGlobal(e){
   if(checarErro(resultado, 'lançar parcela')) return;
   e.target.reset();
   toggleForm('formNovaParcela', false);
-  loadContasReceber();
+  loadEntradas();
 }
 async function marcarParcelaPaga(id){
   const resultado = await sb.from('financeiro_parcelas').update({ status:'pago', data_pagamento: dataLocalISO() }).eq('id', id);
   if(checarErro(resultado, 'marcar parcela como paga')) return;
-  loadContasReceber();
+  loadEntradas();
 }
 async function excluirParcelaGlobal(id){
-  await excluirComConfirmacao('financeiro_parcelas', id, 'essa parcela', () => loadContasReceber());
+  await excluirComConfirmacao('financeiro_parcelas', id, 'essa parcela', () => loadEntradas());
 }
 
 /* ================= FORNECEDORES ================= */
@@ -6150,46 +6269,6 @@ function calcularComissaoRT(){
   }
 }
 
-async function loadComissoesRT(){
-  document.getElementById('crProjeto').dataset.opcional = 'true';
-  await preencherSelectProjetos('crProjeto');
-
-  const [{ data: comissoes }, { data: fornecedores }] = await Promise.all([
-    sb.from('comissoes_rt').select('*, projetos(nome), fornecedores(nome)').order('data_prevista',{ascending:true,nullsFirst:false}),
-    sb.from('fornecedores').select('id,nome').order('nome'),
-  ]);
-
-  document.getElementById('crFornecedor').innerHTML = '<option value="">Sem fornecedor vinculado</option>' +
-    (fornecedores||[]).map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('');
-
-  // Recebidas filtram por data de recebimento; pendentes, por previsão
-  const recebidas = filtrarPorPeriodo((comissoes||[]).filter(c => c.status==='recebido'), 'data_recebimento');
-  const pendentes = (comissoes||[]).filter(c => c.status==='pendente');
-  const lista = [...pendentes, ...recebidas];
-
-  const totalRecebido = recebidas.reduce((s,c) => s + Number(c.valor), 0);
-  const totalPendente = pendentes.reduce((s,c) => s + Number(c.valor), 0);
-
-  document.getElementById('comissoesResumo').innerHTML = `
-    <div class="card"><p class="label">Recebido no período</p><p style="font-size:20px;font-weight:600;color:${CORES.pago};">${fmtMoeda(totalRecebido)}</p></div>
-    <div class="card"><p class="label">A receber</p><p style="font-size:20px;font-weight:600;color:${CORES.pendente};">${fmtMoeda(totalPendente)}</p></div>
-    <div class="card"><p class="label">Comissões lançadas</p><p style="font-size:20px;font-weight:600;">${(comissoes||[]).length}</p></div>`;
-
-  document.getElementById('tabelaComissoes').innerHTML = lista.length===0
-    ? '<tr><td colspan="5" class="muted">Nenhuma comissão lançada ainda.</td></tr>'
-    : lista.map(c => `
-      <tr>
-        <td><p style="margin:0;">${esc(c.descricao||'Comissão')}</p><p style="margin:2px 0 0;font-size:11.5px;color:var(--graphite);">${esc(c.fornecedores?.nome||'')}${c.percentual?` · ${c.percentual}%`:''}</p></td>
-        <td style="font-size:12.5px;">${esc(c.projetos?.nome||'—')}</td>
-        <td>${fmtMoeda(c.valor)}</td>
-        <td>${c.status==='recebido'
-          ? `<span class="pill" style="color:${CORES.pago};border-color:${CORES.pago};">Recebido</span>`
-          : `<button class="pill" style="color:${CORES.pendente};border-color:${CORES.pendente};" onclick="marcarComissaoRecebida('${c.id}')">Pendente · marcar recebida</button>`}
-        </td>
-        <td><button class="remove-link" onclick="excluirComissaoRT('${c.id}')">remover</button></td>
-      </tr>`).join('');
-}
-
 async function criarComissaoRT(e){
   e.preventDefault();
   const valor = parseValorBR(document.getElementById('crValor').value);
@@ -6213,17 +6292,17 @@ async function criarComissaoRT(e){
   if(checarErro(resultado, 'lançar comissão')) return;
   e.target.reset();
   toggleForm('formComissaoRT', false);
-  loadComissoesRT();
+  loadEntradas();
 }
 
 async function marcarComissaoRecebida(id){
   const r = await sb.from('comissoes_rt').update({ status:'recebido', data_recebimento: dataLocalISO() }).eq('id', id);
   if(checarErro(r, 'marcar comissão recebida')) return;
-  loadComissoesRT();
+  loadEntradas();
 }
 
 async function excluirComissaoRT(id){
-  await excluirComConfirmacao('comissoes_rt', id, 'essa comissão', () => loadComissoesRT());
+  await excluirComConfirmacao('comissoes_rt', id, 'essa comissão', () => loadEntradas());
 }
 
 /* ================= DESPESAS FIXAS (se repetem todo mês) ================= */
@@ -6555,18 +6634,11 @@ function renderCronometroEtapa(et){
   </div>`;
 }
 
-async function iniciarCronometroEtapa(etapaId){
-  const sel = document.getElementById('cron-et-'+etapaId);
-  const equipeId = sel ? sel.value : null;
-  if(!equipeId){
-    const temEquipe = (window._equipeAtiva||[]).length > 0;
-    alert(temEquipe
-      ? 'Escolhe quem vai trabalhar nessa etapa antes de iniciar o cronômetro.'
-      : 'Cadastre pelo menos uma pessoa ativa em "Equipe" antes de usar o cronômetro.');
-    if(sel) sel.focus();
-    return;
-  }
-
+/* Núcleo compartilhado por quem chama o cronômetro de etapa — tanto pela aba
+   Etapas dentro do projeto quanto pelo play direto no card do Kanban de Tarefas.
+   Atualiza as duas telas (a que estiver visível reflete na hora, a outra já
+   fica certa quando você voltar pra ela). */
+async function iniciarCronometroEtapaComEquipe(etapaId, equipeId){
   // Uma pessoa não pode ter dois cronômetros rodando ao mesmo tempo
   const { data: jaRodando } = await sb.from('tarefas_tempo')
     .select('id, etapas(nome), tarefas(titulo)')
@@ -6582,14 +6654,46 @@ async function iniciarCronometroEtapa(etapaId){
     etapa_id: etapaId, equipe_id: equipeId, inicio: new Date().toISOString(),
   });
   if(checarErro(resultado, 'iniciar cronômetro da etapa')) return;
-  loadProjetoDetalhe(projetoAtualId);
+  if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
+  loadTarefas();
   carregarCronometrosGlobais();
+}
+
+async function iniciarCronometroEtapa(etapaId){
+  const sel = document.getElementById('cron-et-'+etapaId);
+  const equipeId = sel ? sel.value : null;
+  if(!equipeId){
+    const temEquipe = (window._equipeAtiva||[]).length > 0;
+    alert(temEquipe
+      ? 'Escolhe quem vai trabalhar nessa etapa antes de iniciar o cronômetro.'
+      : 'Cadastre pelo menos uma pessoa ativa em "Equipe" antes de usar o cronômetro.');
+    if(sel) sel.focus();
+    return;
+  }
+  await iniciarCronometroEtapaComEquipe(etapaId, equipeId);
+}
+
+/* Play direto no card compacto do Kanban de Tarefas — mesmo fluxo, só que o
+   "quem vai trabalhar" vem do seletorzinho que abre dentro do próprio card. */
+async function iniciarCronometroEtapaKanban(etapaId, btnEl){
+  const sel = btnEl.closest('.cron-kanban-picker')?.querySelector('select');
+  const equipeId = sel ? sel.value : null;
+  if(!equipeId){
+    const temEquipe = (window._equipeAtiva||[]).length > 0;
+    alert(temEquipe
+      ? 'Escolhe quem vai trabalhar nessa etapa antes de iniciar o cronômetro.'
+      : 'Cadastre pelo menos uma pessoa ativa em "Equipe" antes de usar o cronômetro.');
+    if(sel) sel.focus();
+    return;
+  }
+  await iniciarCronometroEtapaComEquipe(etapaId, equipeId);
 }
 
 async function pararCronometroEtapa(tempoId){
   const resultado = await sb.from('tarefas_tempo').update({ fim: new Date().toISOString() }).eq('id', tempoId);
   if(checarErro(resultado, 'parar cronômetro')) return;
-  loadProjetoDetalhe(projetoAtualId);
+  if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
+  loadTarefas();
   carregarCronometrosGlobais();
 }
 
@@ -7372,4 +7476,44 @@ async function adicionarModeloBonus(){
   if(checarErro(resultado, 'adicionar bônus padrão')) return;
   document.getElementById('cfModeloBonusTexto').value = '';
   loadModelosBonusProposta();
+}
+
+/* ================= DIVISÃO FINANCEIRA ENTRE SÓCIAS ================= */
+async function loadSocios(){
+  const { data: socios } = await sb.from('socios').select('*').order('ordem');
+  document.getElementById('cfSociosLista').innerHTML = (socios||[]).length===0
+    ? '<p class="muted" style="font-size:12.5px;">Nenhuma sócia cadastrada ainda.</p>'
+    : (socios||[]).map(s => `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;" data-socio-id="${s.id}">
+      <input data-campo="nome" value="${esc(s.nome)}" style="flex:2;" />
+      <div style="flex:1;display:flex;align-items:center;gap:4px;">
+        <input data-campo="percentual" type="number" min="0" max="100" step="0.01" value="${s.percentual}" style="width:100%;" />
+        <span class="muted" style="font-size:13px;">%</span>
+      </div>
+    </div>`).join('');
+  document.getElementById('cfSociosSalvo').textContent = '';
+}
+
+async function salvarSocios(){
+  const linhas = Array.from(document.querySelectorAll('#cfSociosLista [data-socio-id]'));
+  if(linhas.length===0) return;
+
+  const atualizacoes = linhas.map(linha => ({
+    id: linha.dataset.socioId,
+    nome: linha.querySelector('[data-campo="nome"]').value.trim() || 'Sócia',
+    percentual: Number(linha.querySelector('[data-campo="percentual"]').value) || 0,
+  }));
+
+  const somaPercentuais = atualizacoes.reduce((s,a) => s + a.percentual, 0);
+  if(Math.round(somaPercentuais) !== 100){
+    const seguir = confirm(`Os percentuais somam ${somaPercentuais}% (não 100%). Salvar assim mesmo?`);
+    if(!seguir) return;
+  }
+
+  for(const a of atualizacoes){
+    const resultado = await sb.from('socios').update({ nome: a.nome, percentual: a.percentual }).eq('id', a.id);
+    if(checarErro(resultado, 'salvar divisão entre sócias')) return;
+  }
+  document.getElementById('cfSociosSalvo').textContent = 'Salvo!';
+  setTimeout(() => { const el = document.getElementById('cfSociosSalvo'); if(el) el.textContent=''; }, 2500);
 }

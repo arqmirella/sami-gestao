@@ -531,6 +531,15 @@
   .cron-etapa-acao{display:flex;gap:7px;}
   .cron-etapa-acao .timer-select{flex:1;min-width:0;}
 
+  /* Cronômetro por etapa direto no card compacto do Kanban de Tarefas */
+  .timer-go-icon{width:28px;height:28px;border:none;border-radius:50%;background:var(--sage);color:#fff;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .timer-go-icon:hover{background:var(--terracotta);}
+  .cron-kanban-picker{display:flex;gap:6px;margin:9px 0 2px;}
+  .cron-kanban-picker .timer-select{flex:1;min-width:0;}
+  .cron-kanban-rodando{margin:9px 0 2px;}
+  .cron-rodando-mini{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff;border-radius:8px;padding:6px 9px;}
+  .cron-rodando-mini .cron-rodando-txt{font-size:12px;flex:1;min-width:0;}
+
   /* Proposta Comercial — inputs soltos (fora de .form-box) nas telas de edição */
   #formEditarProposta input:not([type="checkbox"]):not([type="file"]),
   #formEditarProposta select,
