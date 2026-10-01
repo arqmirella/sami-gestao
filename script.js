@@ -188,7 +188,7 @@ function navigate(view, opts){
   if(view==='financeiro') trocarAbaFinanceiro(subaba);
   if(view==='fornecedores') loadFornecedores();
   if(view==='equipe') loadEquipe();
-  if(view==='config'){ loadConfiguracoes(); loadConfigPropostas(); loadModelosEtapasProposta(); loadModelosBonusProposta(); loadSocios(); }
+  if(view==='config'){ loadConfiguracoes(); loadConfigPropostas(); loadModelosEtapasProposta(); loadModelosBonusProposta(); loadSocios(); loadChecklistConferenciaModelo(); }
   if(view==='projeto-detalhe' && opts.projetoId) loadProjetoDetalhe(opts.projetoId, opts.aba);
   if(view==='cliente-detalhe' && opts.clienteId) loadClienteDetalhe(opts.clienteId);
   if(view==='proposta-detalhe' && opts.propostaId) loadPropostaDetalhe(opts.propostaId);
@@ -943,6 +943,7 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
             <span class="checklist-ambiente-count ${feitos.length===itens.length && itens.length>0 ? 'completo' : ''}">${feitos.length}/${itens.length}</span>
           </summary>
           <div class="checklist-ambiente-corpo">
+            <button type="button" class="btn-ghost" style="font-size:11.5px;padding:0;margin-bottom:8px;display:block;" onclick="aplicarChecklistConferencia('${et.id}',${amb.id?`'${amb.id}'`:'null'},'${projetoAtualId}')">+ aplicar checklist de conferência</button>
             ${pendentes.map(linhaItem).join('')}
             ${feitos.length > 0 ? `
               <details class="checklist-feitos">
@@ -1987,11 +1988,13 @@ async function excluirTarefaKanban(id){
 /* ---- Card compacto de etapa no kanban de Tarefas: abre a lista completa em modal ---- */
 async function abrirModalEtapaTarefas(etapaId){
   const [{ data: tarefas }, { data: etapa }, { data: responsaveis }] = await Promise.all([
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,concluida_em,ambientes(nome)').eq('etapa_id', etapaId).eq('arquivada', false).order('criado_em',{ascending:true}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,ambiente_id,concluida_em').eq('etapa_id', etapaId).eq('arquivada', false).order('criado_em',{ascending:true}),
     sb.from('etapas').select('id,nome,projeto_id,projetos(nome)').eq('id', etapaId).single(),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe(nome)'),
   ]);
   if(!etapa) return;
+
+  const { data: ambientesProjeto } = await sb.from('ambientes').select('id,nome').eq('projeto_id', etapa.projeto_id).order('ordem');
 
   const respPorTarefa = new Map();
   (responsaveis||[]).forEach(r => {
@@ -2012,7 +2015,6 @@ async function abrirModalEtapaTarefas(etapaId){
     return `<div class="checklist-item" style="flex-wrap:wrap;">
       <input type="checkbox" ${t.status==='concluida'?'checked':''} onchange="toggleTarefaModalEtapa('${t.id}','${etapaId}', this.checked)" />
       <span class="${t.status==='concluida'?'done':''}" style="flex:1;min-width:120px;">${esc(t.titulo)}</span>
-      ${t.ambientes?.nome ? `<span class="badge line">${esc(t.ambientes.nome)}</span>` : ''}
       ${resp.map(n => `<span class="badge line">${esc(n)}</span>`).join('')}
       ${atrasada ? '<span class="badge alert">Atrasada</span>' : ''}
       ${t.prazo ? `<span class="mono" style="font-size:11px;color:var(--graphite);">${fmtDataBR(t.prazo)}</span>` : ''}
@@ -2021,19 +2023,100 @@ async function abrirModalEtapaTarefas(etapaId){
     </div>`;
   };
 
+  // Agrupado por ambiente — igual na aba Etapas do projeto — em vez da lista
+  // corrida de antes, que misturava todos os cômodos e ficava difícil de ler.
+  const grupos = [...(ambientesProjeto||[]), { id:null, nome:'Geral' }]
+    .filter(amb => {
+      if(amb.id !== null) return true;
+      const geral = lista.filter(t => !t.ambiente_id);
+      return !((ambientesProjeto||[]).length > 0 && geral.length === 0);
+    })
+    .map(amb => {
+      const itens = lista.filter(t => (t.ambiente_id||null) === amb.id);
+      if(itens.length === 0) return '';
+      const feitos = itens.filter(i=>i.status==='concluida');
+      const pendentes = itens.filter(i=>i.status!=='concluida');
+      const tudoFeito = feitos.length === itens.length && itens.length > 0;
+      return `<details class="checklist-ambiente" ${tudoFeito ? '' : 'open'}>
+        <summary class="checklist-ambiente-titulo">
+          <span>${esc(amb.nome)}</span>
+          <span class="checklist-ambiente-count ${tudoFeito ? 'completo' : ''}">${feitos.length}/${itens.length}</span>
+        </summary>
+        <div class="checklist-ambiente-corpo">
+          <button type="button" class="btn-ghost" style="font-size:11.5px;padding:0;margin-bottom:8px;display:block;" onclick="aplicarChecklistConferencia('${etapaId}',${amb.id?`'${amb.id}'`:'null'},'${etapa.projeto_id}')">+ aplicar checklist de conferência</button>
+          ${pendentes.map(linha).join('')}
+          ${feitos.length > 0 ? `
+            <details class="checklist-feitos">
+              <summary>${feitos.length} concluído${feitos.length>1?'s':''}</summary>
+              ${feitos.map(linha).join('')}
+            </details>` : ''}
+          <form class="checklist-add" onsubmit="adicionarItemChecklistModalEtapa(event,'${etapaId}',${amb.id?`'${amb.id}'`:'null'},'${etapa.projeto_id}')">
+            <input placeholder="+ item" />
+            <button class="btn-ghost" style="border:1px solid var(--line);border-radius:8px;">Add</button>
+          </form>
+        </div>
+      </details>`;
+    }).join('');
+
   abrirModal(`
     <p class="mono" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--graphite);margin:0 0 2px;">${esc(etapa.projetos?.nome||'')}</p>
     <p class="label" style="margin-bottom:10px;font-size:17px;">${esc(etapa.nome)}</p>
     <div class="bar" style="margin-bottom:4px;"><div style="width:${pct}%"></div></div>
     <p class="barcaption" style="margin:0 0 16px;">${feitas.length}/${lista.length} concluídas</p>
-    <div style="max-height:400px;overflow-y:auto;margin-bottom:6px;">
-      ${lista.length===0 ? '<p class="muted" style="font-size:12.5px;">Nenhuma tarefa nessa etapa ainda.</p>' : lista.map(linha).join('')}
+    <div style="max-height:460px;overflow-y:auto;margin-bottom:6px;">
+      ${lista.length===0 ? '<p class="muted" style="font-size:12.5px;">Nenhuma tarefa nessa etapa ainda.</p>' : `<div class="checklist-grid">${grupos}</div>`}
     </div>
     <div class="form-actions">
       <button type="button" class="btn-ghost" style="border:1px solid var(--line);border-radius:9px;" onclick="fecharModalEditar();navigate('projeto-detalhe',{projetoId:'${etapa.projeto_id}',aba:'etapas'});">Abrir etapa no projeto</button>
       <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Fechar</button>
     </div>
-  `);
+  `, {largo:true});
+}
+
+/* Adiciona um item avulso ao checklist de um ambiente, direto no popup do Kanban */
+async function adicionarItemChecklistModalEtapa(e, etapaId, ambienteId, projetoId){
+  e.preventDefault();
+  const input = e.target.querySelector('input');
+  const titulo = input.value.trim();
+  if(!titulo) return;
+  const resultado = await sb.from('tarefas').insert({
+    projeto_id: projetoId,
+    etapa_id: etapaId,
+    ambiente_id: ambienteId || null,
+    titulo,
+  });
+  if(checarErro(resultado, 'adicionar item ao checklist')) return;
+  if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
+  await loadTarefas();
+  abrirModalEtapaTarefas(etapaId);
+}
+
+/* Aplica a lista padrão "Checklist de conferência" (cadastrada em Configurações)
+   num ambiente dessa etapa — não duplica título que esse ambiente já tiver. */
+async function aplicarChecklistConferencia(etapaId, ambienteId, projetoId){
+  const { data: modelo } = await sb.from('checklist_modelo_itens').select('titulo').order('ordem');
+  if(!modelo || modelo.length===0){
+    alert('Ainda não tem nenhum item cadastrado no checklist de conferência.\nCadastre em Configurações → Checklist de conferência.');
+    return;
+  }
+
+  let query = sb.from('tarefas').select('titulo').eq('etapa_id', etapaId);
+  query = ambienteId ? query.eq('ambiente_id', ambienteId) : query.is('ambiente_id', null);
+  const { data: existentes } = await query;
+  const jaTem = new Set((existentes||[]).map(t => t.titulo));
+  const novos = modelo.filter(m => !jaTem.has(m.titulo));
+
+  if(novos.length===0){ alert('Esse ambiente já tem todos os itens do checklist de conferência.'); return; }
+
+  const resultado = await sb.from('tarefas').insert(novos.map(m => ({
+    projeto_id: projetoId, etapa_id: etapaId, ambiente_id: ambienteId || null, titulo: m.titulo,
+  })));
+  if(checarErro(resultado, 'aplicar checklist de conferência')) return;
+
+  if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
+  await loadTarefas();
+  const modal = document.getElementById('modalEditar');
+  if(modal && !modal.classList.contains('hidden')) abrirModalEtapaTarefas(etapaId);
 }
 
 async function toggleTarefaModalEtapa(tarefaId, etapaId, marcado){
@@ -3364,13 +3447,20 @@ async function adicionarItemChecklist(e, etapaId, ambienteId){
 }
 
 /* ================= MODAL DE EDIÇÃO ================= */
-function abrirModal(html){
-  document.getElementById('modalEditarConteudo').innerHTML = html;
+function abrirModal(html, opts){
+  const el = document.getElementById('modalEditarConteudo');
+  el.innerHTML = html;
+  // Modais de formulário ficam melhor estreitos; um checklist com várias
+  // salas precisa de mais largura pra não amontoar tudo. Passe {largo:true}
+  // pros casos assim.
+  el.classList.toggle('modal-box-largo', !!(opts && opts.largo));
   document.getElementById('modalEditar').classList.remove('hidden');
 }
 function fecharModalEditar(){
   document.getElementById('modalEditar').classList.add('hidden');
-  document.getElementById('modalEditarConteudo').innerHTML = '';
+  const el = document.getElementById('modalEditarConteudo');
+  el.innerHTML = '';
+  el.classList.remove('modal-box-largo');
 }
 function recarregarAposEdicao(){
   if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
@@ -7516,4 +7606,27 @@ async function salvarSocios(){
   }
   document.getElementById('cfSociosSalvo').textContent = 'Salvo!';
   setTimeout(() => { const el = document.getElementById('cfSociosSalvo'); if(el) el.textContent=''; }, 2500);
+}
+
+/* ================= CHECKLIST DE CONFERÊNCIA (modelo) ================= */
+async function loadChecklistConferenciaModelo(){
+  const { data: itens } = await sb.from('checklist_modelo_itens').select('*').order('ordem');
+  document.getElementById('cfChecklistConferenciaLista').innerHTML = (itens||[]).length===0
+    ? '<p class="muted" style="font-size:12.5px;">Nenhum item cadastrado ainda.</p>'
+    : itens.map(x => `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+      <span style="flex:1;font-size:13px;">${esc(x.titulo)}</span>
+      <button type="button" class="remove-link" onclick="excluirComConfirmacao('checklist_modelo_itens','${x.id}','esse item do checklist de conferência', loadChecklistConferenciaModelo)">remover</button>
+    </div>`).join('');
+}
+
+async function adicionarChecklistConferenciaItem(){
+  const titulo = document.getElementById('cfChecklistConferenciaTexto').value.trim();
+  if(!titulo) return;
+  const { data: existentes } = await sb.from('checklist_modelo_itens').select('ordem').order('ordem',{ascending:false}).limit(1);
+  const proximaOrdem = existentes && existentes[0] ? existentes[0].ordem + 1 : 0;
+  const resultado = await sb.from('checklist_modelo_itens').insert({ titulo, ordem: proximaOrdem });
+  if(checarErro(resultado, 'adicionar item ao checklist de conferência')) return;
+  document.getElementById('cfChecklistConferenciaTexto').value = '';
+  loadChecklistConferenciaModelo();
 }
