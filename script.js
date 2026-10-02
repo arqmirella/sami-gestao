@@ -842,7 +842,7 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
   ] = await Promise.all([
     sb.from('projetos').select('*, clientes(nome_completo)').eq('id', projetoId).single(),
     sb.from('etapas').select('*').eq('projeto_id', projetoId).order('ordem'),
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,data_inicio,etapa_id,ambiente_id,ambientes(nome)').eq('projeto_id', projetoId).eq('arquivada', false).order('criado_em',{ascending:true}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,data_inicio,etapa_id,ambiente_id,ordem_manual,ambientes(nome)').eq('projeto_id', projetoId).eq('arquivada', false).order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
     sb.from('financeiro_parcelas').select('id,descricao,valor,vencimento,status,data_pagamento').eq('projeto_id', projetoId).order('vencimento'),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe(nome)'),
     sb.from('equipe').select('id,nome').eq('ativo', true).order('nome'),
@@ -931,13 +931,13 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
         const feitos = itens.filter(i=>i.status==='concluida');
         const pendentes = itens.filter(i=>i.status!=='concluida');
         const linhaItem = i => `
-              <div class="checklist-item">
+              <div class="checklist-item" data-tarefa-id="${i.id}" draggable="true" ondragstart="dragStartItemChecklist(event,'${i.id}','${et.id}',${amb.id?`'${amb.id}'`:'null'})" ondragend="dragEndItemChecklist(event)">
                 <input type="checkbox" ${i.status==='concluida'?'checked':''} onchange="toggleChecklistItem('${i.id}', this.checked)" />
                 <span class="${i.status==='concluida'?'done':''}">${esc(i.titulo)}</span>
                 <button class="edit-link" onclick="abrirModalEditarTarefa('${i.id}')">editar</button>
                 <button class="remove-link" onclick="excluirTarefaProjeto('${i.id}')">×</button>
               </div>`;
-        return `<details class="checklist-ambiente">
+        return `<details class="checklist-ambiente" ondragover="dragOverAmbienteChecklist(event,this)" ondragleave="dragLeaveAmbienteChecklist(event,this)" ondrop="dropAmbienteChecklist(event,'${et.id}',${amb.id?`'${amb.id}'`:'null'},'${projetoAtualId}',this)">
           <summary class="checklist-ambiente-titulo">
             <span>${esc(amb.nome)}</span>
             <span class="checklist-ambiente-count ${feitos.length===itens.length && itens.length>0 ? 'completo' : ''}">${feitos.length}/${itens.length}</span>
@@ -1198,7 +1198,8 @@ async function atualizarStatusProjeto(status){
 }
 async function excluirProjetoAtual(){
   if(!confirm('Excluir este projeto? Isso apaga etapas, tarefas e financeiro dele.')) return;
-  await sb.from('projetos').delete().eq('id', projetoAtualId);
+  const resultado = await sb.from('projetos').delete().eq('id', projetoAtualId);
+  if(checarErro(resultado, 'excluir projeto')) return;
   navigate('projetos');
 }
 
@@ -1314,7 +1315,7 @@ async function moverTarefaProjeto(id, status){
   loadProjetoDetalhe(projetoAtualId);
 }
 async function excluirTarefaProjeto(id){
-  await excluirComConfirmacao('tarefas', id, 'essa tarefa', () => loadProjetoDetalhe(projetoAtualId));
+  await excluirComConfirmacao('tarefas', id, 'essa tarefa', () => { loadProjetoDetalhe(projetoAtualId); loadTarefas(); });
 }
 
 /* ---- Financeiro do projeto ---- */
@@ -1404,13 +1405,14 @@ async function adicionarVisita(e){
   e.preventDefault();
   const data = document.getElementById('vsData').value;
   if(!data) return;
-  await sb.from('registros_visita').insert({
+  const resultado = await sb.from('registros_visita').insert({
     projeto_id: projetoAtualId,
     data,
     local: document.getElementById('vsLocal').value.trim() || null,
     participantes: document.getElementById('vsParticipantes').value.trim() || null,
     assuntos: document.getElementById('vsAssuntos').value.trim() || null,
   });
+  if(checarErro(resultado, 'registrar visita')) return;
   e.target.reset();
   loadProjetoDetalhe(projetoAtualId);
 }
@@ -1428,7 +1430,7 @@ async function criarRelatorioObra(e){
   e.preventDefault();
   const dataVisita = document.getElementById('roDataVisita').value;
   if(!dataVisita) return;
-  await sb.from('relatorios_obra').insert({
+  const resultado = await sb.from('relatorios_obra').insert({
     projeto_id: projetoAtualId,
     registro_visita_id: document.getElementById('roVisita').value || null,
     data_visita: dataVisita,
@@ -1439,6 +1441,7 @@ async function criarRelatorioObra(e){
     comunicacao: document.getElementById('roComunicacao').value.trim() || null,
     link_fotos: document.getElementById('roFotos').value.trim() || null,
   });
+  if(checarErro(resultado, 'criar relatório de obra')) return;
   e.target.reset();
   toggleForm('formRelatorioObra', false);
   loadProjetoDetalhe(projetoAtualId);
@@ -1988,7 +1991,7 @@ async function excluirTarefaKanban(id){
 /* ---- Card compacto de etapa no kanban de Tarefas: abre a lista completa em modal ---- */
 async function abrirModalEtapaTarefas(etapaId){
   const [{ data: tarefas }, { data: etapa }, { data: responsaveis }] = await Promise.all([
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,ambiente_id,concluida_em').eq('etapa_id', etapaId).eq('arquivada', false).order('criado_em',{ascending:true}),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,ambiente_id,ordem_manual,concluida_em').eq('etapa_id', etapaId).eq('arquivada', false).order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
     sb.from('etapas').select('id,nome,projeto_id,projetos(nome)').eq('id', etapaId).single(),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe(nome)'),
   ]);
@@ -2012,7 +2015,7 @@ async function abrirModalEtapaTarefas(etapaId){
   const linha = t => {
     const resp = respPorTarefa.get(t.id) || [];
     const atrasada = t.status!=='concluida' && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
-    return `<div class="checklist-item" style="flex-wrap:wrap;">
+    return `<div class="checklist-item" data-tarefa-id="${t.id}" style="flex-wrap:wrap;" draggable="true" ondragstart="dragStartItemChecklist(event,'${t.id}','${etapaId}',${t.ambiente_id?`'${t.ambiente_id}'`:'null'})" ondragend="dragEndItemChecklist(event)">
       <input type="checkbox" ${t.status==='concluida'?'checked':''} onchange="toggleTarefaModalEtapa('${t.id}','${etapaId}', this.checked)" />
       <span class="${t.status==='concluida'?'done':''}" style="flex:1;min-width:120px;">${esc(t.titulo)}</span>
       ${resp.map(n => `<span class="badge line">${esc(n)}</span>`).join('')}
@@ -2037,7 +2040,7 @@ async function abrirModalEtapaTarefas(etapaId){
       const feitos = itens.filter(i=>i.status==='concluida');
       const pendentes = itens.filter(i=>i.status!=='concluida');
       const tudoFeito = feitos.length === itens.length && itens.length > 0;
-      return `<details class="checklist-ambiente" ${tudoFeito ? '' : 'open'}>
+      return `<details class="checklist-ambiente" ${tudoFeito ? '' : 'open'} ondragover="dragOverAmbienteChecklist(event,this)" ondragleave="dragLeaveAmbienteChecklist(event,this)" ondrop="dropAmbienteChecklist(event,'${etapaId}',${amb.id?`'${amb.id}'`:'null'},'${etapa.projeto_id}',this)">
         <summary class="checklist-ambiente-titulo">
           <span>${esc(amb.nome)}</span>
           <span class="checklist-ambiente-count ${tudoFeito ? 'completo' : ''}">${feitos.length}/${itens.length}</span>
@@ -2113,6 +2116,80 @@ async function aplicarChecklistConferencia(etapaId, ambienteId, projetoId){
   })));
   if(checarErro(resultado, 'aplicar checklist de conferência')) return;
 
+  if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
+  await loadTarefas();
+  const modal = document.getElementById('modalEditar');
+  if(modal && !modal.classList.contains('hidden')) abrirModalEtapaTarefas(etapaId);
+}
+
+/* Reorganizar os itens do checklist (dentro da mesma etapa+ambiente): sobe ou desce
+   um item, regravando a ordem de todo o grupo — mesma lógica do reordenar do Kanban. */
+/* Arrastar um item do checklist — pra cima/baixo dentro do mesmo ambiente, ou pra outro
+   ambiente (ou pra "Geral"), dentro da mesma etapa. Antes isso tinha umas setinhas ▲▼
+   do lado de cada item, mas ficava poluído (já tem seta pra tudo quanto é lado nessa
+   tela); agora é só arrastar e soltar na posição certa, igual já funciona no Kanban.
+   No celular, sem arrastar, dá pra trocar de ambiente pelo "editar" do item. */
+let _itemChecklistArrastado = null;
+function dragStartItemChecklist(e, tarefaId, etapaId, ambienteAtual){
+  _itemChecklistArrastado = { id: tarefaId, etapaId, ambienteAtual: ambienteAtual || null };
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+function dragEndItemChecklist(e){
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.checklist-ambiente.drop-alvo').forEach(el => el.classList.remove('drop-alvo'));
+  document.querySelectorAll('.checklist-item.drop-marca').forEach(el => el.classList.remove('drop-marca'));
+}
+/* Descobre sobre qual item do mesmo ambiente o ponteiro está, pra soltar bem ali.
+   Só considera os itens pendentes (filhos diretos do corpo) — os já concluídos ficam
+   escondidos dentro do acordeão "concluídos" e não entram na reordenação visível. */
+function itemChecklistSobOPonteiro(corpo, y){
+  const itens = [...corpo.querySelectorAll(':scope > .checklist-item:not(.dragging)')];
+  for(const it of itens){
+    const caixa = it.getBoundingClientRect();
+    if(y < caixa.top + caixa.height/2) return it;
+  }
+  return null;
+}
+function dragOverAmbienteChecklist(e, el){
+  if(!_itemChecklistArrastado) return;
+  e.preventDefault();
+  el.classList.add('drop-alvo');
+  document.querySelectorAll('.checklist-item.drop-marca').forEach(x => x.classList.remove('drop-marca'));
+  const corpo = el.querySelector('.checklist-ambiente-corpo');
+  const alvo = corpo && itemChecklistSobOPonteiro(corpo, e.clientY);
+  if(alvo) alvo.classList.add('drop-marca');
+}
+function dragLeaveAmbienteChecklist(e, el){
+  el.classList.remove('drop-alvo');
+}
+async function dropAmbienteChecklist(e, etapaId, ambienteDestino, projetoId, el){
+  e.preventDefault();
+  el.classList.remove('drop-alvo');
+  document.querySelectorAll('.checklist-item.drop-marca').forEach(x => x.classList.remove('drop-marca'));
+  const arrastado = _itemChecklistArrastado;
+  _itemChecklistArrastado = null;
+  if(!arrastado || arrastado.etapaId !== etapaId) return;
+
+  const corpo = el.querySelector('.checklist-ambiente-corpo');
+  const alvo = corpo && itemChecklistSobOPonteiro(corpo, e.clientY);
+  const idsNoGrupo = corpo
+    ? [...corpo.querySelectorAll(':scope > .checklist-item')].map(it => it.dataset.tarefaId).filter(id => id && id !== arrastado.id)
+    : [];
+  const posicao = alvo ? idsNoGrupo.indexOf(alvo.dataset.tarefaId) : idsNoGrupo.length;
+  idsNoGrupo.splice(posicao < 0 ? idsNoGrupo.length : posicao, 0, arrastado.id);
+
+  await moverItemChecklistParaPosicao(arrastado.id, etapaId, ambienteDestino, idsNoGrupo);
+}
+async function moverItemChecklistParaPosicao(tarefaId, etapaId, ambienteDestino, idsEmOrdem){
+  const atualizacoes = idsEmOrdem.map((id, idx) => {
+    const mudanca = { ordem_manual: (idx+1)*100 };
+    if(id === tarefaId) mudanca.ambiente_id = ambienteDestino || null;
+    return sb.from('tarefas').update(mudanca).eq('id', id);
+  });
+  const resultados = await Promise.all(atualizacoes);
+  const comErro = resultados.find(r => r && r.error);
+  if(comErro && checarErro(comErro, 'reordenar checklist')) return;
   if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
   await loadTarefas();
   const modal = document.getElementById('modalEditar');
@@ -2863,7 +2940,8 @@ async function salvarEdicaoCliente(e){
 
 async function excluirClienteAtual(){
   if(!confirm('Excluir este cliente?')) return;
-  await sb.from('clientes').delete().eq('id', clienteAtualId);
+  const resultado = await sb.from('clientes').delete().eq('id', clienteAtualId);
+  if(checarErro(resultado, 'excluir cliente')) return;
   navigate('clientes');
 }
 
@@ -3392,9 +3470,7 @@ async function adicionarAmbiente(e){
   loadProjetoDetalhe(projetoAtualId);
 }
 async function excluirAmbiente(id){
-  if(!confirm('Remover esse ambiente? As tarefas que já estavam nele continuam existindo, só ficam sem ambiente vinculado.')) return;
-  await sb.from('ambientes').delete().eq('id', id);
-  loadProjetoDetalhe(projetoAtualId);
+  await excluirComConfirmacao('ambientes', id, 'esse ambiente (as tarefas que já estavam nele continuam existindo, só ficam sem ambiente vinculado)', () => loadProjetoDetalhe(projetoAtualId));
 }
 
 async function duplicarAmbiente(ambienteId, nomeAtual){
@@ -3429,6 +3505,7 @@ async function toggleChecklistItem(tarefaId, marcado){
   }).eq('id', tarefaId);
   if(checarErro(resultado, 'atualizar checklist')) return;
   loadProjetoDetalhe(projetoAtualId);
+  loadTarefas();
 }
 
 async function adicionarItemChecklist(e, etapaId, ambienteId){
@@ -3444,6 +3521,7 @@ async function adicionarItemChecklist(e, etapaId, ambienteId){
   });
   if(checarErro(resultado, 'adicionar item ao checklist')) return;
   loadProjetoDetalhe(projetoAtualId);
+  loadTarefas();
 }
 
 /* ================= MODAL DE EDIÇÃO ================= */
@@ -6318,6 +6396,7 @@ async function renderPainelHoje(){
                 <span style="color:var(--graphite);font-size:11.5px;"> · ${fmtDataBR(p.vencimento)}</span></span>
               <b>${fmtMoeda(p.valor)}</b>
             </div>`).join('')}
+          ${daSemana.length>5?`<p class="muted" style="font-size:11.5px;margin:6px 0 0;">+${daSemana.length-5} outras</p>`:''}
         </div>` : ''}
 
       ${(contasAtrasadas.length + contasSemana.length) > 0 ? `
@@ -6332,6 +6411,7 @@ async function renderPainelHoje(){
                 <span style="color:${d.vencimento<hojeStr?'var(--alert)':'var(--graphite)'};font-size:11.5px;"> · ${d.vencimento<hojeStr?`${diasAtraso(d.vencimento)}d atrasada`:fmtDataBR(d.vencimento)}</span></span>
               <b>${fmtMoeda(d.valor)}</b>
             </div>`).join('')}
+          ${(contasAtrasadas.length+contasSemana.length)>5?`<p class="muted" style="font-size:11.5px;margin:6px 0 0;">+${contasAtrasadas.length+contasSemana.length-5} outras</p>`:''}
         </div>` : ''}
 
       ${(comissoesPend||[]).length > 0 ? `
@@ -6345,6 +6425,7 @@ async function renderPainelHoje(){
               <span>${esc(c.descricao||'Comissão')}</span>
               <b>${fmtMoeda(c.valor)}</b>
             </div>`).join('')}
+          ${comissoesPend.length>5?`<p class="muted" style="font-size:11.5px;margin:6px 0 0;">+${comissoesPend.length-5} outras</p>`:''}
         </div>` : ''}
     </div>`;
 }
@@ -6897,7 +6978,7 @@ function renderTarefasEscritorio(tarefas){
         ${t.prazo ? `<span style="color:${atrasada?'var(--alert)':'var(--graphite)'};">${fmtDataBR(t.prazo)}</span>` : ''}
       </div>
     </div>`;
-  }).join('');
+  }).join('') + (doEscritorio.length>8?`<p class="muted" style="font-size:11.5px;padding:6px 14px 2px;">+${doEscritorio.length-8} outras</p>`:'');
 }
 
 async function criarTarefaEscritorio(e){
