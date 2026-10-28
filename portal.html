@@ -266,18 +266,63 @@ async function carregarERenderizar(){
             <div onclick="event.stopPropagation();">
               ${a.status==='pendente' ? `
                 <div class="dados-contrato-form">
-                  <label>Nome completo</label>
+                  <p class="label" style="margin:0 0 6px;">Seus dados</p>
+                  <label>Nome completo *</label>
                   <input id="dc-nome-${a.id}" value="${esc(a.dados_nome||'')}" />
-                  <label>CPF</label>
+                  <label>CPF *</label>
                   <input id="dc-cpf-${a.id}" value="${esc(a.dados_cpf||'')}" placeholder="000.000.000-00" />
                   <label>RG</label>
                   <input id="dc-rg-${a.id}" value="${esc(a.dados_rg||'')}" />
-                  <button class="btn-aprovar" style="margin-top:6px;" onclick="enviarDadosContrato('${a.id}')">Enviar dados</button>
+                  <label>Data de nascimento</label>
+                  <input id="dc-nascimento-${a.id}" type="date" value="${esc(a.dados_nascimento||'')}" />
+                  <label>Estado civil</label>
+                  <input id="dc-estadocivil-${a.id}" value="${esc(a.dados_estado_civil||'')}" />
+                  <label>Profissão</label>
+                  <input id="dc-profissao-${a.id}" value="${esc(a.dados_profissao||'')}" />
+                  <label>Endereço atual</label>
+                  <input id="dc-endereco-${a.id}" value="${esc(a.dados_endereco||'')}" />
+                  <label>Telefones</label>
+                  <input id="dc-telefones-${a.id}" value="${esc(a.dados_telefones||'')}" />
+                  <label>E-mail</label>
+                  <input id="dc-email-${a.id}" value="${esc(a.dados_email||'')}" />
+                  <label>Forma de pagamento combinada</label>
+                  <input id="dc-pagamento-${a.id}" value="${esc(a.dados_forma_pagamento||'')}" />
+
+                  <p class="label" style="margin:14px 0 6px;">Cônjuge (se houver)</p>
+                  <label>Nome do cônjuge</label>
+                  <input id="dc-conjugenome-${a.id}" value="${esc(a.dados_conjuge_nome||'')}" />
+                  <label>Data de nascimento</label>
+                  <input id="dc-conjugenascimento-${a.id}" type="date" value="${esc(a.dados_conjuge_nascimento||'')}" />
+                  <label>Profissão</label>
+                  <input id="dc-conjugeprofissao-${a.id}" value="${esc(a.dados_conjuge_profissao||'')}" />
+                  <label>Telefones</label>
+                  <input id="dc-conjugetelefones-${a.id}" value="${esc(a.dados_conjuge_telefones||'')}" />
+                  <label>E-mail</label>
+                  <input id="dc-conjugeemail-${a.id}" value="${esc(a.dados_conjuge_email||'')}" />
+
+                  <p class="label" style="margin:14px 0 6px;">Informações da obra</p>
+                  <label>Endereço da obra</label>
+                  <input id="dc-obraendereco-${a.id}" value="${esc(a.dados_obra_endereco||'')}" />
+                  <label>Nome do zelador</label>
+                  <input id="dc-zeladornome-${a.id}" value="${esc(a.dados_zelador_nome||'')}" />
+                  <label>Contato do zelador</label>
+                  <input id="dc-zeladorcontato-${a.id}" value="${esc(a.dados_zelador_contato||'')}" />
+                  <label>Nome do síndico</label>
+                  <input id="dc-sindiconome-${a.id}" value="${esc(a.dados_sindico_nome||'')}" />
+                  <label>Contato do síndico</label>
+                  <input id="dc-sindicocontato-${a.id}" value="${esc(a.dados_sindico_contato||'')}" />
+
+                  <button class="btn-aprovar" style="margin-top:12px;" onclick="enviarDadosContrato('${a.id}')">Enviar dados</button>
                 </div>
               ` : `
                 <div class="aprov-comentario-lido">
                   <p style="margin:0 0 3px;"><b>${esc(a.dados_nome||'')}</b></p>
                   <p style="margin:0;">CPF: ${esc(a.dados_cpf||'—')} · RG: ${esc(a.dados_rg||'—')}</p>
+                  ${a.dados_endereco ? `<p style="margin:3px 0 0;">${esc(a.dados_endereco)}</p>` : ''}
+                  ${(a.dados_profissao || a.dados_estado_civil) ? `<p style="margin:3px 0 0;">${[a.dados_profissao, a.dados_estado_civil].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
+                  ${(a.dados_telefones || a.dados_email) ? `<p style="margin:3px 0 0;">${[a.dados_telefones, a.dados_email].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
+                  ${a.dados_conjuge_nome ? `<p style="margin:8px 0 0;"><b>Cônjuge:</b> ${esc(a.dados_conjuge_nome)}</p>` : ''}
+                  ${a.dados_obra_endereco ? `<p style="margin:8px 0 0;"><b>Obra:</b> ${esc(a.dados_obra_endereco)}</p>` : ''}
                 </div>
               `}
             </div>
@@ -371,13 +416,30 @@ async function marcarItemChecklist(itemId, marcado){
 }
 
 async function enviarDadosContrato(aprovacaoId){
-  const nome = document.getElementById('dc-nome-'+aprovacaoId).value.trim();
-  const cpf = document.getElementById('dc-cpf-'+aprovacaoId).value.trim();
-  const rg = document.getElementById('dc-rg-'+aprovacaoId).value.trim();
+  const v = campo => { const el = document.getElementById('dc-'+campo+'-'+aprovacaoId); return el ? el.value.trim() : ''; };
+  const nome = v('nome');
+  const cpf = v('cpf');
   if(!nome || !cpf){ alert('Preenche pelo menos o nome e o CPF.'); return; }
-  const { data, error } = await window._sb.rpc('portal_enviar_dados_contrato', {
-    p_token: window._token, p_aprovacao_id: aprovacaoId, p_nome: nome, p_cpf: cpf, p_rg: rg || null,
+  let { data, error } = await window._sb.rpc('portal_enviar_dados_contrato', {
+    p_token: window._token, p_aprovacao_id: aprovacaoId,
+    p_nome: nome, p_cpf: cpf, p_rg: v('rg') || null,
+    p_nascimento: v('nascimento') || null, p_estado_civil: v('estadocivil') || null, p_profissao: v('profissao') || null,
+    p_endereco: v('endereco') || null, p_telefones: v('telefones') || null, p_email: v('email') || null,
+    p_forma_pagamento: v('pagamento') || null,
+    p_conjuge_nome: v('conjugenome') || null, p_conjuge_nascimento: v('conjugenascimento') || null,
+    p_conjuge_profissao: v('conjugeprofissao') || null, p_conjuge_telefones: v('conjugetelefones') || null,
+    p_conjuge_email: v('conjugeemail') || null,
+    p_obra_endereco: v('obraendereco') || null, p_zelador_nome: v('zeladornome') || null,
+    p_zelador_contato: v('zeladorcontato') || null, p_sindico_nome: v('sindiconome') || null,
+    p_sindico_contato: v('sindicocontato') || null,
   });
+  // Rede de segurança: se a função do banco ainda é a antiga (só nome/CPF/RG), o Supabase
+  // responde "função não encontrada" — nesse caso manda o básico pra não travar o cliente.
+  if(error && (error.code === 'PGRST202' || /could not find the function|schema cache/i.test(error.message || ''))){
+    ({ data, error } = await window._sb.rpc('portal_enviar_dados_contrato', {
+      p_token: window._token, p_aprovacao_id: aprovacaoId, p_nome: nome, p_cpf: cpf, p_rg: v('rg') || null,
+    }));
+  }
   if(error || !data){
     alert('Não consegui enviar. Tenta de novo.');
     return;

@@ -3306,7 +3306,7 @@ async function uploadAnexo(file){
 
 async function loadAnexos(){
   const [{ data: anexos }, { data: etapas }, { data: tarefas }] = await Promise.all([
-    sb.from('anexos').select('id,nome_arquivo,url,etapa_id,tarefa_id,criado_em,etapas(nome),tarefas(titulo)').eq('projeto_id', projetoAtualId).order('criado_em',{ascending:false}),
+    sb.from('anexos').select('id,nome_arquivo,url,etapa_id,tarefa_id,visivel_cliente,criado_em,etapas(nome),tarefas(titulo)').eq('projeto_id', projetoAtualId).order('criado_em',{ascending:false}),
     sb.from('etapas').select('id,nome').eq('projeto_id', projetoAtualId),
     sb.from('tarefas').select('id,titulo').eq('projeto_id', projetoAtualId),
   ]);
@@ -3321,6 +3321,7 @@ async function loadAnexos(){
           <div style="margin-top:4px;">
             ${a.etapas?.nome ? `<span class="badge line">${esc(a.etapas.nome)}</span>` : ''}
             ${a.tarefas?.titulo ? `<span class="badge line">${esc(a.tarefas.titulo)}</span>` : ''}
+            <button type="button" class="badge ${a.visivel_cliente?'line':''}" style="cursor:pointer;border:1px solid var(--line);background:${a.visivel_cliente?'var(--sage)':'transparent'};color:${a.visivel_cliente?'#fff':'var(--graphite)'};" onclick="alternarVisibilidadeAnexo('${a.id}', ${a.visivel_cliente})">${a.visivel_cliente ? '✓ visível pro cliente' : 'mostrar pro cliente'}</button>
           </div>
         </div>
         <button class="remove-link" onclick="excluirAnexo('${a.id}')">remover</button>
@@ -3341,6 +3342,7 @@ async function adicionarAnexo(e){
     tarefa_id: document.getElementById('anTarefa').value || null,
     nome_arquivo: arquivo.name,
     url,
+    visivel_cliente: document.getElementById('anVisivelCliente').checked,
   });
   if(checarErro(resultado, 'salvar anexo')) return;
   e.target.reset();
@@ -3348,6 +3350,11 @@ async function adicionarAnexo(e){
 }
 async function excluirAnexo(id){
   await excluirComConfirmacao('anexos', id, 'esse anexo', () => loadAnexos());
+}
+async function alternarVisibilidadeAnexo(id, visivelAtual){
+  const resultado = await sb.from('anexos').update({ visivel_cliente: !visivelAtual }).eq('id', id);
+  if(checarErro(resultado, 'atualizar visibilidade do anexo')) return;
+  loadAnexos();
 }
 
 /* ================= MURAL DE RECADOS ================= */
@@ -4066,7 +4073,7 @@ async function loadGaleria3D(){
 
 async function loadAprovacoes(){
   const [{ data: aprovacoes }, { data: etapas }] = await Promise.all([
-    sb.from('aprovacoes_cliente').select('id,tipo,titulo,descricao,status,comentario_cliente,data_resposta,criado_em,visto_pela_equipe,etapa_id,eh_checklist,dados_nome,dados_cpf,dados_rg,etapas(nome),aprovacao_imagens(url),aprovacao_checklist_itens(id,item,marcado)').eq('projeto_id', projetoAtualId).order('criado_em', { ascending: false }),
+    sb.from('aprovacoes_cliente').select('id,tipo,titulo,descricao,status,comentario_cliente,data_resposta,criado_em,visto_pela_equipe,etapa_id,eh_checklist,dados_nome,dados_cpf,dados_rg,dados_nascimento,dados_estado_civil,dados_profissao,dados_endereco,dados_telefones,dados_email,dados_forma_pagamento,dados_conjuge_nome,dados_conjuge_nascimento,dados_conjuge_profissao,dados_conjuge_telefones,dados_conjuge_email,dados_obra_endereco,dados_zelador_nome,dados_zelador_contato,dados_sindico_nome,dados_sindico_contato,etapas(nome),aprovacao_imagens(url),aprovacao_checklist_itens(id,item,marcado)').eq('projeto_id', projetoAtualId).order('criado_em', { ascending: false }),
     sb.from('etapas').select('id,nome').eq('projeto_id', projetoAtualId),
   ]);
 
@@ -4114,7 +4121,13 @@ async function loadAprovacoes(){
             ? '<p class="muted" style="font-size:12.5px;">Aguardando o cliente preencher pelo link dele.</p>'
             : `<div style="background:var(--paper);border-radius:9px;padding:10px;">
                 <p style="font-size:13px;margin:0 0 4px;"><b>${esc(a.dados_nome||'')}</b></p>
-                <p style="font-size:12.5px;margin:0;color:var(--graphite);">CPF: ${esc(a.dados_cpf||'—')} · RG: ${esc(a.dados_rg||'—')}</p>
+                <p style="font-size:12.5px;margin:0;color:var(--graphite);">CPF: ${esc(a.dados_cpf||'—')} · RG: ${esc(a.dados_rg||'—')}${a.dados_nascimento?` · Nasc. ${fmtDataBR(a.dados_nascimento)}`:''}</p>
+                ${(a.dados_profissao || a.dados_estado_civil) ? `<p style="font-size:12.5px;margin:2px 0 0;color:var(--graphite);">${[a.dados_profissao, a.dados_estado_civil].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
+                ${a.dados_endereco ? `<p style="font-size:12.5px;margin:2px 0 0;color:var(--graphite);">${esc(a.dados_endereco)}</p>` : ''}
+                ${(a.dados_telefones || a.dados_email) ? `<p style="font-size:12.5px;margin:2px 0 0;color:var(--graphite);">${[a.dados_telefones, a.dados_email].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
+                ${a.dados_forma_pagamento ? `<p style="font-size:12.5px;margin:2px 0 0;color:var(--graphite);">Pagamento: ${esc(a.dados_forma_pagamento)}</p>` : ''}
+                ${a.dados_conjuge_nome ? `<p style="font-size:12.5px;margin:6px 0 0;"><b>Cônjuge:</b> ${esc(a.dados_conjuge_nome)}${a.dados_conjuge_profissao?` · ${esc(a.dados_conjuge_profissao)}`:''}</p>` : ''}
+                ${(a.dados_obra_endereco || a.dados_zelador_nome || a.dados_sindico_nome) ? `<p style="font-size:12.5px;margin:6px 0 0;"><b>Obra:</b> ${[a.dados_obra_endereco, a.dados_zelador_nome?`zelador: ${a.dados_zelador_nome}`:'', a.dados_sindico_nome?`síndico: ${a.dados_sindico_nome}`:''].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
                 <p class="muted" style="font-size:11px;margin:6px 0 0;">Já atualizado automaticamente no cadastro do cliente.</p>
               </div>`}
         </div>
