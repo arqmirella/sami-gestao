@@ -423,7 +423,10 @@
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;">
         <div>
           <p class="label" id="pdCliente"></p>
-          <h1 id="pdNome" style="margin:0;"></h1>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <h1 id="pdNome" style="margin:0;"></h1>
+            <button type="button" class="edit-link" title="Mudar o nome do projeto" onclick="abrirModalRenomearProjeto()">✎ renomear</button>
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end;">
           <button id="btnConcluirProjeto" class="btn" style="display:none;" onclick="concluirProjetoAtual()">✓ Concluir projeto</button>
@@ -441,6 +444,7 @@
       <div class="pd-nav-wrap">
         <nav class="pd-sidenav">
           <button type="button" class="pd-tab on" data-tab="geral" onclick="trocarAbaProjeto('geral')">Visão geral</button>
+          <button type="button" class="pd-tab" data-tab="tarefas" onclick="trocarAbaProjeto('tarefas')">Tarefas</button>
           <button type="button" class="pd-tab" data-tab="produtividade" onclick="trocarAbaProjeto('produtividade')">Produtividade</button>
 
           <p class="pd-nav-group">Planejamento</p>
@@ -482,19 +486,16 @@
         <div id="briefingConteudo"></div>
       </div>
 
+      <!-- Sub-aba: Tarefas (quadro estilo Trello) -->
+      <div id="pdtab-tarefas" class="pd-tabcontent hidden">
+        <div id="quadroProjeto"><p class="muted">Carregando tarefas...</p></div>
+      </div>
+
       <div id="pdtab-geral" class="pd-tabcontent">
         <div class="grid" style="grid-template-columns:1.1fr 1.1fr 0.8fr;gap:32px;">
           <div>
             <p class="col-label">Tarefas</p>
-            <form onsubmit="adicionarTarefaProjeto(event)" class="form-box" style="max-width:100%;padding:12px;margin-bottom:12px;">
-              <input id="tpTitulo" required placeholder="Nova tarefa" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:8px;" />
-              <div style="display:flex;gap:6px;">
-                <select id="tpEtapa" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:12.5px;"><option value="">Sem etapa</option></select>
-                <select id="tpAmbiente" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:12.5px;"><option value="">Sem ambiente</option></select>
-                <button class="btn" style="padding:8px 12px;">+</button>
-              </div>
-            </form>
-            <div id="listaTarefasProjeto"></div>
+            <div id="resumoTarefasProjeto"></div>
           </div>
           <div>
             <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
@@ -554,7 +555,7 @@
       <div id="pdtab-etapas" class="pd-tabcontent hidden">
         <div class="card" style="max-width:560px;margin-bottom:16px;">
           <p class="label" style="margin-bottom:8px;">Ambientes do projeto</p>
-          <p class="muted" style="margin-top:0;font-size:12px;">Cadastre uma vez (ex: Sala, Cozinha, Suíte 1) — depois é só marcar o checklist de cada um dentro de cada etapa.</p>
+          <p class="muted" style="margin-top:0;font-size:12px;">Cadastre uma vez (ex: Sala, Cozinha, Suíte 1) — depois é só escolher o ambiente em cada cartão da aba Tarefas.</p>
           <form onsubmit="adicionarAmbiente(event)" style="display:flex;gap:6px;margin-bottom:10px;">
             <input id="ambNome" placeholder="Nome do ambiente" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
             <button class="btn" style="padding:8px 12px;">+</button>
@@ -581,7 +582,7 @@
           <textarea id="etResumo" placeholder="Resumo (opcional)" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;"></textarea>
           <details style="margin-bottom:10px;">
             <summary class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);cursor:pointer;">Tarefas automáticas por dependência (avançado)</summary>
-            <p class="muted" style="font-size:12px;margin:6px 0;">Só funciona se essa etapa depender de outra (acima). Uma tarefa por linha — são criadas sozinhas quando a etapa da qual essa depende for concluída. Pro dia a dia, use o checklist por ambiente que aparece depois de criar a etapa.</p>
+            <p class="muted" style="font-size:12px;margin:6px 0;">Só funciona se essa etapa depender de outra (acima). Uma tarefa por linha — são criadas sozinhas quando a etapa da qual essa depende for concluída. Pro dia a dia, use a aba Tarefas (quadro).</p>
             <textarea id="etTarefasModelo" placeholder="Ex:&#10;Levantamento fotográfico&#10;Medição in loco&#10;Reunião de briefing" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:0;"></textarea>
           </details>
           <button class="btn">+ Adicionar etapa</button>

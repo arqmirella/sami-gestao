@@ -817,6 +817,7 @@ function trocarAbaProjeto(tab){
   abaProjetoAtual = tab;
   document.querySelectorAll('.pd-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'pdtab-'+tab));
   document.querySelectorAll('.pd-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
+  if(tab==='tarefas') loadQuadroProjeto();
   if(tab==='anexos') loadAnexos();
   if(tab==='orcamentos') loadOrcamentosProjeto();
   if(tab==='contrato') loadContrato();
@@ -919,44 +920,7 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
       const bloqueio = et.bloqueado_por ? etapaNomeMap.get(et.bloqueado_por) : null;
       const tarefasDaEtapa = (tarefas||[]).filter(t => t.etapa_id === et.id);
 
-      const gruposChecklist = [...(ambientes||[]), { id:null, nome:'Geral' }]
-        .filter(amb => {
-          if(amb.id !== null) return true;
-          const itensGeral = tarefasDaEtapa.filter(t => !t.ambiente_id);
-          // "Geral" só some quando já existe pelo menos 1 ambiente cadastrado E não tem nada solto nele
-          return !((ambientes||[]).length > 0 && itensGeral.length === 0);
-        })
-        .map(amb => {
-        const itens = tarefasDaEtapa.filter(t => (t.ambiente_id||null) === amb.id);
-        const feitos = itens.filter(i=>i.status==='concluida');
-        const pendentes = itens.filter(i=>i.status!=='concluida');
-        const linhaItem = i => `
-              <div class="checklist-item" data-tarefa-id="${i.id}" draggable="true" ondragstart="dragStartItemChecklist(event,'${i.id}','${et.id}',${amb.id?`'${amb.id}'`:'null'})" ondragend="dragEndItemChecklist(event)">
-                <input type="checkbox" ${i.status==='concluida'?'checked':''} onchange="toggleChecklistItem('${i.id}', this.checked)" />
-                <span class="${i.status==='concluida'?'done':''}">${esc(i.titulo)}</span>
-                <button class="edit-link" onclick="abrirModalEditarTarefa('${i.id}')">editar</button>
-                <button class="remove-link" onclick="excluirTarefaProjeto('${i.id}')">×</button>
-              </div>`;
-        return `<details class="checklist-ambiente" ondragover="dragOverAmbienteChecklist(event,this)" ondragleave="dragLeaveAmbienteChecklist(event,this)" ondrop="dropAmbienteChecklist(event,'${et.id}',${amb.id?`'${amb.id}'`:'null'},'${projetoAtualId}',this)">
-          <summary class="checklist-ambiente-titulo">
-            <span>${esc(amb.nome)}</span>
-            <span class="checklist-ambiente-count ${feitos.length===itens.length && itens.length>0 ? 'completo' : ''}">${feitos.length}/${itens.length}</span>
-          </summary>
-          <div class="checklist-ambiente-corpo">
-            <button type="button" class="btn-ghost" style="font-size:11.5px;padding:0;margin-bottom:8px;display:block;" onclick="aplicarChecklistConferencia('${et.id}',${amb.id?`'${amb.id}'`:'null'},'${projetoAtualId}')">+ aplicar checklist de conferência</button>
-            ${pendentes.map(linhaItem).join('')}
-            ${feitos.length > 0 ? `
-              <details class="checklist-feitos">
-                <summary>${feitos.length} concluído${feitos.length>1?'s':''}</summary>
-                ${feitos.map(linhaItem).join('')}
-              </details>` : ''}
-            <form class="checklist-add" onsubmit="adicionarItemChecklist(event,'${et.id}',${amb.id?`'${amb.id}'`:'null'})">
-              <input placeholder="+ item" />
-              <button class="btn-ghost" style="border:1px solid var(--line);border-radius:8px;">Add</button>
-            </form>
-          </div>
-        </details>`;
-      }).join('');
+      const feitasEtapa = tarefasDaEtapa.filter(t => t.status==='concluida').length;
 
       return `<div class="task-card">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
@@ -982,9 +946,9 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
         </div>
         ${et.resumo ? `<p style="font-size:12.5px;color:var(--graphite);margin:0 0 8px;">${esc(et.resumo)}</p>` : ''}
 
-        <div style="border-top:1px solid var(--line);padding-top:10px;margin-top:4px;">
-          <p class="mono" style="font-size:11.5px;text-transform:uppercase;color:var(--graphite);margin:0 0 8px;">Checklist</p>
-          <div class="checklist-grid">${gruposChecklist}</div>
+        <div style="border-top:1px solid var(--line);padding-top:10px;margin-top:4px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <span class="muted" style="font-size:12.5px;">${tarefasDaEtapa.length ? `${feitasEtapa}/${tarefasDaEtapa.length} tarefas feitas` : 'Nenhuma tarefa nessa etapa ainda'}</span>
+          <button type="button" class="btn-ghost" style="font-size:12.5px;" onclick="quadroVerEtapa('${et.id}')">Ver no quadro →</button>
         </div>
 
         <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:8px;margin-top:10px;">
@@ -997,49 +961,33 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
       </div>`;
     }).join('');
 
-  /* ---- Tarefas (agrupadas por etapa + ambiente, pra não repetir um monte de itens soltos) ---- */
-  const gruposTarefas = new Map();
-  tarefas.forEach(t => {
-    const chave = `${t.etapa_id||'_'}|${t.ambiente_id||'_'}`;
-    if(!gruposTarefas.has(chave)) gruposTarefas.set(chave, []);
-    gruposTarefas.get(chave).push(t);
-  });
-
-  document.getElementById('listaTarefasProjeto').innerHTML = (tarefas||[]).length===0
-    ? '<p class="muted">Nenhuma tarefa ainda.</p>'
-    : `<div class="checklist-grid">${Array.from(gruposTarefas.entries()).map(([chave, itens]) => {
-      const [etapaId, ambienteId] = chave.split('|');
-      const nomeEtapa = etapaId!=='_' ? etapaNomeMap.get(etapaId) : null;
-      const nomeAmbiente = itens[0].ambientes?.nome || null;
-      const tituloGrupo = [nomeEtapa, nomeAmbiente].filter(Boolean).join(' — ') || 'Sem etapa / ambiente';
-      const concluidas = itens.filter(t => t.status==='concluida').length;
-      return `<details class="checklist-ambiente" ${itens.length<=1?'open':''}>
-        <summary class="checklist-ambiente-titulo">
-          <span>${esc(tituloGrupo)}</span>
-          <span class="checklist-ambiente-count ${concluidas===itens.length?'completo':''}">${concluidas}/${itens.length}</span>
-        </summary>
-        <div class="checklist-ambiente-corpo">
-          ${itens.map(t => {
-            const resp = respPorTarefa.get(t.id) || [];
-            return `<div class="task-card" style="box-shadow:none;">
-              <div style="display:flex;justify-content:space-between;gap:8px;">
-                <p class="task-title">${esc(t.titulo)}</p>
-                <div style="display:flex;gap:8px;flex-shrink:0;">
-                  <button class="edit-link" onclick="abrirModalEditarTarefa('${t.id}')">editar</button>
-                  <button class="remove-link" onclick="excluirTarefaProjeto('${t.id}')">remover</button>
-                </div>
-              </div>
-              ${resp.length ? `<div style="margin:6px 0;">${resp.map(n=>`<span class="badge line">${esc(n)}</span>`).join('')}</div>` : ''}
-              <div class="move-row" style="margin-top:8px;">
-                <button onclick="moverTarefaProjeto('${t.id}','pendente')" style="${t.status==='pendente'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Pendente</button>
-                <button onclick="moverTarefaProjeto('${t.id}','em_andamento')" style="${t.status==='em_andamento'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Andamento</button>
-                <button onclick="moverTarefaProjeto('${t.id}','concluida')" style="${t.status==='concluida'?'background:var(--terracotta);color:#fff;border-color:var(--terracotta);':''}">Concluída</button>
-              </div>
-            </div>`;
-          }).join('')}
-        </div>
-      </details>`;
-    }).join('')}</div>`;
+  /* ---- Tarefas: resumo na visão geral (o trabalho de verdade fica na aba Tarefas) ---- */
+  const hojeResumo = new Date(); hojeResumo.setHours(0,0,0,0);
+  const nAFazer = (tarefas||[]).filter(t => t.status==='pendente').length;
+  const nFazendo = (tarefas||[]).filter(t => t.status==='em_andamento').length;
+  const nFeitas = (tarefas||[]).filter(t => t.status==='concluida').length;
+  const emAberto = (tarefas||[]).filter(t => t.status!=='concluida');
+  const atrasadasResumo = emAberto.filter(t => t.prazo && new Date(t.prazo+'T00:00:00') < hojeResumo);
+  const fazendoResumo = emAberto.filter(t => t.status==='em_andamento' && !atrasadasResumo.includes(t));
+  const linhaResumo = (t, atrasada) => `<div class="resumo-tarefa" onclick="abrirModalEditarTarefa('${t.id}')">
+      <span class="resumo-tarefa-titulo">${esc(t.titulo)}</span>
+      <span class="resumo-tarefa-meta${atrasada?' atraso':''}">${(respPorTarefa.get(t.id)||[]).map(esc).join(', ')}${t.prazo?`${(respPorTarefa.get(t.id)||[]).length?' · ':''}${fmtDataBR(t.prazo)}`:''}</span>
+    </div>`;
+  const blocoLista = (titulo, lista, atrasada) => lista.length === 0 ? '' : `
+    <p class="mono" style="font-size:11.5px;text-transform:uppercase;color:${atrasada?'var(--alert)':'var(--graphite)'};margin:14px 0 6px;">${titulo} (${lista.length})</p>
+    ${lista.slice(0,5).map(t => linhaResumo(t, atrasada)).join('')}
+    ${lista.length>5 ? `<p class="muted" style="font-size:12px;margin:4px 0 0;">+ ${lista.length-5} no quadro</p>` : ''}`;
+  document.getElementById('resumoTarefasProjeto').innerHTML = (tarefas||[]).length===0
+    ? `<p class="muted" style="margin:0 0 12px;">Nenhuma tarefa ainda.</p>
+       <button type="button" class="btn" onclick="trocarAbaProjeto('tarefas')">Abrir quadro de tarefas →</button>`
+    : `<div class="resumo-contagem">
+         <div><b>${nAFazer}</b><span>A fazer</span></div>
+         <div><b>${nFazendo}</b><span>Fazendo</span></div>
+         <div><b>${nFeitas}</b><span>Feito</span></div>
+       </div>
+       <button type="button" class="btn" style="width:100%;margin-top:10px;" onclick="trocarAbaProjeto('tarefas')">Abrir quadro de tarefas →</button>
+       ${blocoLista('Atrasadas', atrasadasResumo, true)}
+       ${blocoLista('Fazendo agora', fazendoResumo, false)}`;
 
   /* ---- Financeiro ---- */
   const total = (parcelas||[]).reduce((s,p) => s + Number(p.valor), 0);
@@ -1129,11 +1077,6 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
     (etapas||[]).map(et => `<option value="${et.id}">${esc(et.nome)}</option>`).join('');
   document.getElementById('anTarefa').innerHTML = '<option value="">Sem tarefa vinculada</option>' +
     (tarefas||[]).map(t => `<option value="${t.id}">${esc(t.titulo)}</option>`).join('');
-
-  document.getElementById('tpEtapa').innerHTML = '<option value="">Sem etapa</option>' +
-    (etapas||[]).map(et => `<option value="${et.id}">${esc(et.nome)}</option>`).join('');
-  document.getElementById('tpAmbiente').innerHTML = '<option value="">Sem ambiente</option>' +
-    (ambientes||[]).map(a => `<option value="${a.id}">${esc(a.nome)}</option>`).join('');
 
   renderPortalCliente(projeto);
   renderStatusDocumentosFinais(projeto);
@@ -1292,31 +1235,816 @@ function abrirTermoEtapa(etapaId){
   });
 }
 
-/* ---- Tarefas do projeto ---- */
-async function adicionarTarefaProjeto(e){
-  e.preventDefault();
-  const titulo = document.getElementById('tpTitulo').value.trim();
-  if(!titulo) return;
-  const resultado = await sb.from('tarefas').insert({
-    projeto_id: projetoAtualId,
-    titulo,
-    etapa_id: document.getElementById('tpEtapa').value || null,
-    ambiente_id: document.getElementById('tpAmbiente').value || null,
+/* ================= QUADRO DE TAREFAS DO PROJETO (estilo Trello) =================
+   Aba "Tarefas" dentro de cada projeto. Um cartão = uma tarefa (tabela tarefas), com
+   responsáveis, etapa, ambiente, prazo, observação e uma lista de itens dentro dele.
+   Os itens antigos de checklist (etapa + ambiente) aparecem agrupados em "pilhas". */
+const QUADRO_STATUS = [
+  { status:'pendente', label:'A fazer', dot:'pendente' },
+  { status:'em_andamento', label:'Fazendo', dot:'andamento' },
+  { status:'concluida', label:'Feito', dot:'concluida' },
+];
+const QUADRO_CORES = ['#C1602E','#5C6E5A','#7A5C8E','#4A7A8C','#9C6B4F','#8B3A2B','#3E4A3E'];
+const QUADRO_FEITOS_VISIVEIS = 8;
+
+let quadro = { projetoId:null, schema:true, tarefas:[], resp:new Map(), etapas:[], ambientes:[], equipe:[] };
+let quadroVisao = 'andamento';              // 'andamento' | 'etapa' | 'ambiente'
+let quadroFiltro = { etapa:'', ambiente:'', pessoa:'' };
+let quadroPilhasAbertas = new Set();
+let quadroTodosFeitos = false;
+let _qdArrastando = null;
+let _qdAdicionando = false;
+
+/* O SQL 43 (observação, marca de cartão e itens do cartão) pode ainda não ter sido rodado.
+   Descobre uma vez por sessão; sem ele o quadro funciona, só sem esses extras. */
+async function temSchema43(){
+  if(window._s43 === undefined){
+    const [a, b] = await Promise.all([
+      sb.from('tarefas').select('cartao,observacao').limit(1),
+      sb.from('tarefa_itens').select('id').limit(1),
+    ]);
+    window._s43 = !a.error && !b.error;
+  }
+  return window._s43;
+}
+function quadroCampos(schema){
+  return 'id,titulo,status,terceirizado,prazo,data_inicio,etapa_id,ambiente_id,ordem_manual,concluida_em,criado_em' +
+    (schema ? ',cartao,observacao,tarefa_itens(id,feito)' : '');
+}
+function quadroNormalizar(t){
+  const etapa = (quadro.etapas||[]).find(e => e.id === t.etapa_id);
+  const n = { ...t, cartao: !!t.cartao, itens: t.tarefa_itens || t.itens || [] };
+  delete n.tarefa_itens;
+  n.prazo_herdado = false;
+  if(!n.prazo && etapa && etapa.data_fim){ n.prazo = etapa.data_fim; n.prazo_herdado = true; }
+  return n;
+}
+
+async function loadQuadroProjeto(){
+  if(!projetoAtualId) return;
+  const pid = projetoAtualId;
+  if(quadro.projetoId !== pid){
+    quadroFiltro = { etapa:'', ambiente:'', pessoa:'' };
+    quadroPilhasAbertas = new Set();
+    quadroTodosFeitos = false;
+    quadro = { ...quadro, projetoId: null, tarefas: [] };
+    const cont = document.getElementById('quadroProjeto');
+    if(cont) cont.innerHTML = '<p class="muted">Carregando tarefas...</p>';
+  }
+  const schema = await temSchema43();
+  const [rt, rr, re, ra, rq] = await Promise.all([
+    sb.from('tarefas').select(quadroCampos(schema)).eq('projeto_id', pid).eq('arquivada', false)
+      .order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
+    sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id'),
+    sb.from('etapas').select('id,nome,data_fim').eq('projeto_id', pid).order('ordem'),
+    sb.from('ambientes').select('id,nome').eq('projeto_id', pid).order('ordem'),
+    sb.from('equipe').select('id,nome').eq('ativo', true).order('nome'),
+  ]);
+  if(projetoAtualId !== pid) return;   // trocou de projeto enquanto carregava
+  if(checarErro(rt, 'carregar tarefas do projeto')) return;
+
+  const resp = new Map();
+  (rr.data||[]).forEach(r => {
+    const lista = resp.get(r.tarefa_id) || [];
+    lista.push(r.equipe_id);
+    resp.set(r.tarefa_id, lista);
   });
-  if(checarErro(resultado, 'criar tarefa')) return;
-  e.target.reset();
-  loadProjetoDetalhe(projetoAtualId);
+  quadro = { projetoId: pid, schema, tarefas: [], resp, etapas: re.data||[], ambientes: ra.data||[], equipe: rq.data||[] };
+  quadro.tarefas = (rt.data||[]).map(quadroNormalizar);
+  renderQuadro();
 }
-async function moverTarefaProjeto(id, status){
-  const mudancas = { status };
-  if(status==='concluida') mudancas.concluida_em = new Date().toISOString();
-  const r = await sb.from('tarefas').update(mudancas).eq('id', id);
-  if(checarErro(r, 'mover tarefa')) return;
-  loadProjetoDetalhe(projetoAtualId);
+
+/* ---- Colunas, filtros e agrupamento ---- */
+function quadroColunas(){
+  if(quadroVisao === 'etapa'){
+    let cols = [...quadro.etapas.map(e => ({ chave:'e:'+e.id, nome:e.nome, tipo:'etapa', valor:e.id })),
+                { chave:'e:_', nome:'Sem etapa', tipo:'etapa', valor:null }];
+    if(quadroFiltro.etapa) cols = cols.filter(c => c.chave === 'e:' + (quadroFiltro.etapa==='_sem' ? '_' : quadroFiltro.etapa));
+    return cols;
+  }
+  if(quadroVisao === 'ambiente'){
+    let cols = [...quadro.ambientes.map(a => ({ chave:'a:'+a.id, nome:a.nome, tipo:'ambiente', valor:a.id })),
+                { chave:'a:_', nome:'Sem ambiente', tipo:'ambiente', valor:null }];
+    if(quadroFiltro.ambiente) cols = cols.filter(c => c.chave === 'a:' + (quadroFiltro.ambiente==='_sem' ? '_' : quadroFiltro.ambiente));
+    return cols;
+  }
+  return QUADRO_STATUS.map(s => ({ chave:s.status, nome:s.label, tipo:'status', valor:s.status, dot:s.dot }));
 }
-async function excluirTarefaProjeto(id){
-  await excluirComConfirmacao('tarefas', id, 'essa tarefa', () => { loadProjetoDetalhe(projetoAtualId); loadTarefas(); });
+function quadroChaveColuna(t){
+  if(quadroVisao === 'etapa') return 'e:' + (t.etapa_id || '_');
+  if(quadroVisao === 'ambiente') return 'a:' + (t.ambiente_id || '_');
+  return (t.status === 'em_andamento' || t.status === 'concluida') ? t.status : 'pendente';
 }
+function quadroTarefasFiltradas(){
+  const f = quadroFiltro;
+  return quadro.tarefas.filter(t =>
+    (!f.etapa || (f.etapa==='_sem' ? !t.etapa_id : t.etapa_id === f.etapa)) &&
+    (!f.ambiente || (f.ambiente==='_sem' ? !t.ambiente_id : t.ambiente_id === f.ambiente)) &&
+    (!f.pessoa || (quadro.resp.get(t.id)||[]).includes(f.pessoa))
+  );
+}
+function quadroReordenar(){
+  quadro.tarefas.sort((a,b) => {
+    const x = a.ordem_manual, y = b.ordem_manual;
+    if(x == null && y != null) return 1;
+    if(x != null && y == null) return -1;
+    if(x !== y && x != null) return x - y;
+    return String(a.criado_em||'').localeCompare(String(b.criado_em||''));
+  });
+}
+function quadroIniciais(nome){
+  const p = String(nome||'').trim().split(/\s+/).filter(Boolean);
+  return ((p[0]||'')[0] || '?').toUpperCase() + ((p.length > 1 ? p[p.length-1][0] : '') || '').toUpperCase();
+}
+function quadroCorEtapa(etapaId){
+  const i = quadro.etapas.findIndex(e => e.id === etapaId);
+  return QUADRO_CORES[(i < 0 ? 0 : i) % QUADRO_CORES.length];
+}
+
+/* ---- Desenho ---- */
+function quadroCartaoHTML(t, hoje){
+  const feito = t.status === 'concluida';
+  const atrasada = !feito && t.prazo && new Date(t.prazo+'T00:00:00') < hoje;
+  const etapa = quadro.etapas.find(e => e.id === t.etapa_id);
+  const amb = quadro.ambientes.find(a => a.id === t.ambiente_id);
+  const respIds = quadro.resp.get(t.id) || [];
+  const nomes = respIds.map(id => (quadro.equipe.find(m => m.id === id) || {}).nome).filter(Boolean);
+  const itens = t.itens || [];
+  const itensFeitos = itens.filter(i => i.feito).length;
+  const cor = etapa ? quadroCorEtapa(etapa.id) : null;
+  const etiquetas = [
+    (etapa && quadroVisao !== 'etapa') ? `<span class="qd-etiq" style="background:${cor}22;color:${cor};">${esc(etapa.nome)}</span>` : '',
+    (amb && quadroVisao !== 'ambiente') ? `<span class="qd-etiq qd-etiq-amb">${esc(amb.nome)}</span>` : '',
+    t.status === 'em_andamento' && quadroVisao !== 'andamento' ? '<span class="qd-etiq qd-etiq-fazendo">Fazendo</span>' : '',
+    t.terceirizado ? '<span class="qd-etiq qd-etiq-amb">Terceirizado</span>' : '',
+  ].join('');
+  const rodape = [
+    t.prazo ? `<span class="${atrasada?'qd-atraso':''}" title="${t.prazo_herdado?'Prazo da etapa':'Prazo'}">${fmtDataBR(t.prazo)}${t.prazo_herdado?' <span style="opacity:.6;">(etapa)</span>':''}</span>` : '',
+    itens.length ? `<span class="${itensFeitos===itens.length?'qd-ok':''}" title="Itens do cartão">☑ ${itensFeitos}/${itens.length}</span>` : '',
+    t.observacao ? '<span title="Tem observação">≡</span>' : '',
+  ].filter(Boolean).join('');
+  const avatares = nomes.slice(0,3).map(n => `<span class="qd-avatar" title="${esc(n)}">${esc(quadroIniciais(n))}</span>`).join('') +
+    (nomes.length > 3 ? `<span class="qd-avatar">+${nomes.length-3}</span>` : '');
+  return `<div class="qd-card${feito?' feito':''}${atrasada?' atrasada':''}" draggable="true" data-id="${t.id}"
+      ondragstart="quadroDragStart(event,'${t.id}')" ondragend="quadroDragEnd(event)" onclick="abrirModalEditarTarefa('${t.id}')">
+    <div class="qd-linha">
+      <button type="button" class="qd-check${feito?' on':''}" title="${feito?'Marcar como não feito':'Marcar como feito'}" onclick="event.stopPropagation();quadroAlternarFeito('${t.id}')">✓</button>
+      <p class="qd-titulo">${esc(t.titulo)}</p>
+    </div>
+    ${etiquetas ? `<div class="qd-etiquetas">${etiquetas}</div>` : ''}
+    ${(rodape || avatares) ? `<div class="qd-rodape">${rodape}<span class="qd-avatares">${avatares}</span></div>` : ''}
+  </div>`;
+}
+
+function quadroPilhaHTML(chave, itens){
+  const aberta = quadroPilhasAbertas.has(chave);
+  const t0 = itens[0];
+  const etapa = quadro.etapas.find(e => e.id === t0.etapa_id);
+  const amb = quadro.ambientes.find(a => a.id === t0.ambiente_id);
+  const titulo = [amb && amb.nome, etapa && etapa.nome].filter(Boolean).join(' · ') || 'Itens do checklist';
+  const feitos = itens.filter(i => i.status === 'concluida').length;
+  const ids = itens.map(i => i.id).join(',');
+  return `<div class="qd-pilha${aberta?' aberta':''}">
+    <button type="button" class="qd-pilha-cab" onclick="quadroAlternarPilha('${esc(chave)}')">
+      <span class="qd-seta">${aberta?'▾':'▸'}</span>
+      <span class="qd-pilha-titulo">${esc(titulo)}</span>
+      <span class="qd-pilha-qtd">${feitos}/${itens.length}</span>
+    </button>
+    ${aberta ? `<div class="qd-pilha-corpo">
+      ${itens.map(i => `<div class="qd-pilha-item">
+        <input type="checkbox" ${i.status==='concluida'?'checked':''} onchange="quadroAlternarFeito('${i.id}')" />
+        <span class="${i.status==='concluida'?'done':''}" onclick="abrirModalEditarTarefa('${i.id}')">${esc(i.titulo)}</span>
+      </div>`).join('')}
+      <button type="button" class="btn-ghost qd-pilha-acao" onclick="quadroDesempilhar('${ids}')">virar cartões separados</button>
+    </div>` : ''}
+  </div>`;
+}
+
+function renderQuadro(){
+  const cont = document.getElementById('quadroProjeto');
+  if(!cont) return;
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const cols = quadroColunas();
+  const tarefas = quadroTarefasFiltradas();
+
+  // preserva o que estava sendo digitado e onde estava o cursor
+  const rascunhos = {};
+  cont.querySelectorAll('.qd-add textarea').forEach(ta => { if(ta.value) rascunhos[ta.dataset.col] = ta.value; });
+  const colFocada = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.col : null;
+  const rolagemAntes = (cont.querySelector('.qd-board') || {}).scrollLeft || 0;   // no celular, não volta pra primeira coluna a cada mudança
+
+  const opcoes = (lista, valor, vazio, semLabel) =>
+    `<option value="">${vazio}</option>` +
+    (semLabel ? `<option value="_sem" ${valor==='_sem'?'selected':''}>${semLabel}</option>` : '') +
+    lista.map(x => `<option value="${x.id}" ${valor===x.id?'selected':''}>${esc(x.nome)}</option>`).join('');
+
+  const colunasHTML = cols.map(col => {
+    let daColuna = tarefas.filter(t => quadroChaveColuna(t) === col.chave);
+    const ehFeito = col.tipo === 'status' && col.valor === 'concluida';
+    if(ehFeito) daColuna = daColuna.slice().sort((a,b) => String(b.concluida_em||b.criado_em||'').localeCompare(String(a.concluida_em||a.criado_em||'')));
+    const cartoes = daColuna.filter(t => t.cartao || !t.etapa_id);
+    const antigos = daColuna.filter(t => !t.cartao && t.etapa_id);
+
+    let visiveis = cartoes, ocultos = 0;
+    if(ehFeito && !quadroTodosFeitos && cartoes.length > QUADRO_FEITOS_VISIVEIS){
+      visiveis = cartoes.slice(0, QUADRO_FEITOS_VISIVEIS);
+      ocultos = cartoes.length - QUADRO_FEITOS_VISIVEIS;
+    }
+    const pilhas = new Map();
+    antigos.forEach(t => {
+      const k = `${col.chave}|${t.etapa_id}|${t.ambiente_id||''}`;
+      if(!pilhas.has(k)) pilhas.set(k, []);
+      pilhas.get(k).push(t);
+    });
+
+    return `<div class="qd-col" data-col="${col.chave}" ondragover="quadroDragOver(event,this)" ondragleave="this.classList.remove('drag-over')" ondrop="quadroDrop(event,'${col.chave}',this)">
+      <div class="col-header">
+        ${col.dot ? `<span class="col-dot ${col.dot}"></span>` : ''}
+        <p class="col-label">${esc(col.nome)}</p>
+        <span class="col-count">${daColuna.length}</span>
+      </div>
+      <div class="qd-lista">
+        ${visiveis.map(t => quadroCartaoHTML(t, hoje)).join('')}
+        ${ocultos ? `<button type="button" class="btn-ghost qd-mais" onclick="quadroTodosFeitos=true;renderQuadro()">ver mais ${ocultos} feito${ocultos>1?'s':''}</button>` : ''}
+        ${(ehFeito && quadroTodosFeitos && cartoes.length > QUADRO_FEITOS_VISIVEIS) ? `<button type="button" class="btn-ghost qd-mais" onclick="quadroTodosFeitos=false;renderQuadro()">mostrar menos</button>` : ''}
+        ${Array.from(pilhas.entries()).map(([k, itens]) => quadroPilhaHTML(k, itens)).join('')}
+      </div>
+      <div class="qd-add">
+        <textarea data-col="${col.chave}" rows="1" placeholder="+ Adicionar cartão" oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'" onkeydown="quadroTecla(event,'${col.chave}')"></textarea>
+      </div>
+    </div>`;
+  }).join('');
+
+  const total = quadro.tarefas.length;
+  cont.innerHTML = `
+    ${quadro.schema ? '' : `<div class="qd-aviso">Falta rodar o <b>atualizacao-schema-43.sql</b> no Supabase para ativar observação e lista de itens dentro do cartão. O quadro já funciona sem isso.</div>`}
+    <div class="qd-barra">
+      <div class="qd-seg">
+        <button type="button" class="${quadroVisao==='andamento'?'on':''}" onclick="quadroTrocarVisao('andamento')">Andamento</button>
+        <button type="button" class="${quadroVisao==='etapa'?'on':''}" onclick="quadroTrocarVisao('etapa')">Etapa</button>
+        <button type="button" class="${quadroVisao==='ambiente'?'on':''}" onclick="quadroTrocarVisao('ambiente')">Ambiente</button>
+      </div>
+      <select class="qd-filtro" onchange="quadroFiltrar('etapa',this.value)">${opcoes(quadro.etapas, quadroFiltro.etapa, 'Todas as etapas', 'Sem etapa')}</select>
+      <select class="qd-filtro" onchange="quadroFiltrar('ambiente',this.value)">${opcoes(quadro.ambientes, quadroFiltro.ambiente, 'Todos os ambientes', 'Sem ambiente')}</select>
+      <select class="qd-filtro" onchange="quadroFiltrar('pessoa',this.value)">${opcoes(quadro.equipe, quadroFiltro.pessoa, 'Todas as pessoas')}</select>
+      ${(quadroFiltro.etapa||quadroFiltro.ambiente||quadroFiltro.pessoa) ? '<button type="button" class="btn-ghost" style="font-size:12px;" onclick="quadroLimparFiltros()">limpar filtros</button>' : ''}
+    </div>
+    ${total === 0 ? '<p class="muted" style="margin:0 0 14px;">Nenhuma tarefa ainda. Digite embaixo de uma coluna e aperte Enter para criar a primeira.</p>' : ''}
+    <div class="qd-board">${colunasHTML}</div>`;
+
+  const boardNovo = cont.querySelector('.qd-board');
+  if(boardNovo && rolagemAntes) boardNovo.scrollLeft = rolagemAntes;
+  cont.querySelectorAll('.qd-add textarea').forEach(ta => {
+    if(rascunhos[ta.dataset.col]) ta.value = rascunhos[ta.dataset.col];
+    if(colFocada && ta.dataset.col === colFocada) ta.focus();
+  });
+}
+
+function quadroTrocarVisao(v){ quadroVisao = v; renderQuadro(); }
+function quadroFiltrar(campo, valor){ quadroFiltro[campo] = valor; renderQuadro(); }
+function quadroLimparFiltros(){ quadroFiltro = { etapa:'', ambiente:'', pessoa:'' }; renderQuadro(); }
+function quadroAlternarPilha(chave){
+  if(quadroPilhasAbertas.has(chave)) quadroPilhasAbertas.delete(chave); else quadroPilhasAbertas.add(chave);
+  renderQuadro();
+}
+function quadroVerEtapa(etapaId){
+  quadroFiltro = { etapa: etapaId, ambiente:'', pessoa:'' };
+  quadroVisao = 'andamento';
+  trocarAbaProjeto('tarefas');
+}
+
+/* ---- Aplicar mudança no que está na tela e avisar as outras telas ---- */
+function quadroAplicarLocal(id, campos){
+  const t = quadro.tarefas.find(x => x.id === id);
+  if(t){
+    Object.assign(t, campos);
+    if('etapa_id' in campos || 'prazo' in campos){
+      const n = quadroNormalizar({ ...t, prazo: ('prazo' in campos) ? campos.prazo : (t.prazo_herdado ? null : t.prazo) });
+      Object.assign(t, { prazo: n.prazo, prazo_herdado: n.prazo_herdado });
+    }
+    quadroReordenar();
+    renderQuadro();
+  }
+  window._quadroSujo = true;
+}
+
+async function quadroAlternarFeito(id){
+  const t = quadro.tarefas.find(x => x.id === id);
+  if(!t) return;
+  const feito = t.status === 'concluida';
+  const mud = feito ? { status:'pendente', concluida_em:null } : { status:'concluida', concluida_em:new Date().toISOString() };
+  quadroAplicarLocal(id, mud);
+  const r = await sb.from('tarefas').update(mud).eq('id', id);
+  if(checarErro(r, 'marcar tarefa')) loadQuadroProjeto();
+}
+
+/* ---- Adicionar cartões (digita e Enter; colar várias linhas cria vários cartões) ---- */
+function quadroTecla(e, chave){
+  const ta = e.target;
+  if(e.key === 'Enter' && !e.shiftKey){
+    e.preventDefault();
+    const texto = ta.value;
+    ta.value = '';
+    quadroAdicionar(chave, texto).then(ok => { if(!ok) { const ta2 = document.querySelector(`.qd-add textarea[data-col="${chave}"]`); if(ta2 && !ta2.value) ta2.value = texto; } });
+  } else if(e.key === 'Escape'){
+    ta.value = '';
+    ta.blur();
+  }
+}
+
+async function quadroAdicionar(chave, texto){
+  const titulos = String(texto||'').split(/\n+/).map(s => s.trim()).filter(Boolean);
+  if(titulos.length === 0 || _qdAdicionando) return false;
+  const col = quadroColunas().find(c => c.chave === chave);
+  if(!col) return false;
+  _qdAdicionando = true;
+  try {
+    const base = { projeto_id: quadro.projetoId };
+    if(quadro.schema) base.cartao = true;
+    if(col.tipo === 'status'){
+      base.status = col.valor;
+      if(col.valor === 'concluida') base.concluida_em = new Date().toISOString();
+    }
+    if(col.tipo === 'etapa') base.etapa_id = col.valor;
+    if(col.tipo === 'ambiente') base.ambiente_id = col.valor;
+    if(base.etapa_id === undefined && quadroFiltro.etapa && quadroFiltro.etapa !== '_sem') base.etapa_id = quadroFiltro.etapa;
+    if(base.ambiente_id === undefined && quadroFiltro.ambiente && quadroFiltro.ambiente !== '_sem') base.ambiente_id = quadroFiltro.ambiente;
+
+    // vai pro fim da coluna; se algum cartão ainda não tem ordem, numera a coluna antes
+    const daColuna = quadro.tarefas.filter(t => quadroChaveColuna(t) === chave && (t.cartao || !t.etapa_id));
+    const escritasOrdem = [];
+    let ordem = 0;
+    if(daColuna.some(t => t.ordem_manual == null)){
+      daColuna.forEach((t, i) => { t.ordem_manual = (i+1) * 100; escritasOrdem.push(sb.from('tarefas').update({ ordem_manual: t.ordem_manual }).eq('id', t.id)); });
+      ordem = daColuna.length * 100;
+    } else if(daColuna.length){
+      ordem = Math.max(...daColuna.map(t => t.ordem_manual));
+    }
+    const linhas = titulos.map(titulo => ({ ...base, titulo, ordem_manual: (ordem += 100) }));
+
+    const r = await sb.from('tarefas').insert(linhas).select(quadroCampos(quadro.schema));
+    if(checarErro(r, 'adicionar cartão')) return false;
+    const novas = (r.data||[]).map(quadroNormalizar);
+
+    if(quadroFiltro.pessoa && novas.length){
+      const rr = await sb.from('tarefas_responsaveis').insert(novas.map(n => ({ tarefa_id: n.id, equipe_id: quadroFiltro.pessoa })));
+      if(!checarErro(rr, 'definir responsável')) novas.forEach(n => quadro.resp.set(n.id, [quadroFiltro.pessoa]));
+    }
+    quadro.tarefas.push(...novas);
+    quadroReordenar();
+    window._quadroSujo = true;
+    renderQuadro();
+    const ta = document.querySelector(`.qd-add textarea[data-col="${chave}"]`);
+    if(ta) ta.focus();
+    await Promise.all(escritasOrdem);
+    return true;
+  } finally {
+    _qdAdicionando = false;
+  }
+}
+
+/* ---- Arrastar entre colunas e reordenar ---- */
+function quadroDragStart(e, id){
+  _qdArrastando = id;
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', id); } catch(_) {}   // o Firefox só começa a arrastar se houver dado
+  e.currentTarget.classList.add('dragging');
+}
+function quadroDragEnd(e){
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.qd-card.drop-marca').forEach(el => el.classList.remove('drop-marca'));
+  document.querySelectorAll('.qd-col.drag-over').forEach(el => el.classList.remove('drag-over'));
+  _qdArrastando = null;
+}
+function quadroCartaoSobPonteiro(col, y){
+  const cards = [...col.querySelectorAll('.qd-card[data-id]:not(.dragging)')];
+  for(const c of cards){
+    const caixa = c.getBoundingClientRect();
+    if(y < caixa.top + caixa.height/2) return c;
+  }
+  return null;
+}
+function quadroDragOver(e, col){
+  if(!_qdArrastando) return;
+  e.preventDefault();
+  col.classList.add('drag-over');
+  document.querySelectorAll('.qd-card.drop-marca').forEach(el => el.classList.remove('drop-marca'));
+  const alvo = quadroCartaoSobPonteiro(col, e.clientY);
+  if(alvo) alvo.classList.add('drop-marca');
+}
+async function quadroDrop(e, chave, col){
+  e.preventDefault();
+  col.classList.remove('drag-over');
+  document.querySelectorAll('.qd-card.drop-marca').forEach(el => el.classList.remove('drop-marca'));
+  const id = _qdArrastando;
+  _qdArrastando = null;
+  if(!id) return;
+  const t = quadro.tarefas.find(x => x.id === id);
+  const colDef = quadroColunas().find(c => c.chave === chave);
+  if(!t || !colDef) return;
+
+  // nova posição dentro da coluna
+  const alvo = quadroCartaoSobPonteiro(col, e.clientY);
+  const ids = [...col.querySelectorAll('.qd-card[data-id]')].map(c => c.dataset.id).filter(x => x !== id);
+  const pos = alvo ? ids.indexOf(alvo.dataset.id) : ids.length;
+  ids.splice(pos < 0 ? ids.length : pos, 0, id);
+
+  // o que muda no cartão arrastado, conforme a coluna de destino
+  let mudCartao = {};
+  if(colDef.tipo === 'status' && t.status !== colDef.valor){
+    mudCartao = { status: colDef.valor, concluida_em: colDef.valor === 'concluida' ? new Date().toISOString() : null };
+  }
+  if(colDef.tipo === 'etapa' && (t.etapa_id || null) !== colDef.valor) mudCartao = { etapa_id: colDef.valor };
+  if(colDef.tipo === 'ambiente' && (t.ambiente_id || null) !== colDef.valor) mudCartao = { ambiente_id: colDef.valor };
+
+  const escritas = [];
+  ids.forEach((tid, i) => {
+    const x = quadro.tarefas.find(y => y.id === tid);
+    if(!x) return;
+    const mud = {};
+    if(x.ordem_manual !== (i+1) * 100) mud.ordem_manual = (i+1) * 100;
+    if(tid === id) Object.assign(mud, mudCartao);
+    if(Object.keys(mud).length === 0) return;
+    escritas.push({ tid, mud });
+  });
+  if(escritas.length === 0) return;
+
+  // já mostra na tela; grava em seguida
+  escritas.forEach(w => {
+    const x = quadro.tarefas.find(y => y.id === w.tid);
+    Object.assign(x, w.mud);
+  });
+  if('etapa_id' in mudCartao){ const n = quadroNormalizar({ ...t, prazo: t.prazo_herdado ? null : t.prazo }); t.prazo = n.prazo; t.prazo_herdado = n.prazo_herdado; }
+  quadroReordenar();
+  window._quadroSujo = true;
+  renderQuadro();
+
+  const resultados = await Promise.all(escritas.map(w => sb.from('tarefas').update(w.mud).eq('id', w.tid)));
+  const falhou = resultados.find(r => r && r.error);
+  if(falhou){ checarErro(falhou, 'mover cartão'); loadQuadroProjeto(); }
+}
+
+async function quadroDesempilhar(idsTexto){
+  const ids = String(idsTexto).split(',').filter(Boolean);
+  if(ids.length === 0) return;
+  ids.forEach(id => { const t = quadro.tarefas.find(x => x.id === id); if(t) t.cartao = true; });
+  window._quadroSujo = true;
+  renderQuadro();
+  if(!quadro.schema){ loadQuadroProjeto(); return; }
+  const r = await sb.from('tarefas').update({ cartao: true }).in('id', ids);
+  if(checarErro(r, 'separar cartões')) loadQuadroProjeto();
+}
+
+/* ================= JANELA DO CARTÃO (substitui a antiga "editar tarefa") =================
+   Salva sozinha a cada mudança. Funciona a partir do quadro do projeto, do Kanban geral
+   e das listas das etapas. */
+async function abrirModalEditarTarefa(tarefaId){
+  const schema = await temSchema43();
+  const aberto = !document.getElementById('modalEditar').classList.contains('hidden');
+  const hintTarefa = (quadro.tarefas||[]).find(t => t.id === tarefaId) || (window._tarefas||[]).find(t => t.id === tarefaId);
+  const pidHint = hintTarefa ? hintTarefa.projeto_id || (quadro.projetoId) : null;
+
+  const pedidos = [
+    sb.from('tarefas').select('*, projetos(nome)').eq('id', tarefaId).single(),
+    sb.from('tarefa_comentarios').select('*').eq('tarefa_id', tarefaId).order('criado_em', { ascending: true }),
+    sb.from('tarefas_tempo').select('id,inicio,fim,duracao_segundos,equipe(nome)').eq('tarefa_id', tarefaId).order('inicio', { ascending: false }),
+    schema ? sb.from('tarefa_itens').select('*').eq('tarefa_id', tarefaId).order('ordem').order('criado_em') : Promise.resolve({ data: [] }),
+    sb.from('equipe').select('id,nome').eq('ativo', true).order('nome'),
+    sb.from('tarefas_responsaveis').select('equipe_id').eq('tarefa_id', tarefaId),
+  ];
+  if(pidHint){
+    pedidos.push(sb.from('etapas').select('id,nome').eq('projeto_id', pidHint).order('ordem'));
+    pedidos.push(sb.from('ambientes').select('id,nome').eq('projeto_id', pidHint).order('ordem'));
+  }
+  const res = await Promise.all(pedidos);
+  const tarefa = res[0].data;
+  if(!tarefa) return;
+  let etapas = [], ambientes = [];
+  if(pidHint && tarefa.projeto_id === pidHint){ etapas = res[6].data||[]; ambientes = res[7].data||[]; }
+  else if(tarefa.projeto_id){
+    const [e, a] = await Promise.all([
+      sb.from('etapas').select('id,nome').eq('projeto_id', tarefa.projeto_id).order('ordem'),
+      sb.from('ambientes').select('id,nome').eq('projeto_id', tarefa.projeto_id).order('ordem'),
+    ]);
+    etapas = e.data||[]; ambientes = a.data||[];
+  }
+  if(!aberto) window._cartaoAlterado = false;
+  window._cartao = {
+    id: tarefaId, schema, tarefa,
+    comentarios: res[1].data||[], registrosTempo: res[2].data||[],
+    itens: res[3].data||[], equipe: res[4].data||[],
+    resp: new Set((res[5].data||[]).map(r => r.equipe_id)),
+    etapas, ambientes,
+  };
+  abrirModal(cartaoHTML(), { largo:true });
+}
+
+function cartaoOpcoes(lista, valor, vazio){
+  return `<option value="">${vazio}</option>` + lista.map(x => `<option value="${x.id}" ${x.id===valor?'selected':''}>${esc(x.nome)}</option>`).join('');
+}
+
+function cartaoHTML(){
+  const c = window._cartao, t = c.tarefa;
+  const nomeSalvoComentario = localStorage.getItem('sami_nome_recado') || '';
+  const totalSegundos = c.registrosTempo.reduce((soma, r) => soma + (r.duracao_segundos || 0), 0);
+  const campo = 'width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-family:inherit;font-size:13.5px;';
+  const rot = 'font-family:\'IBM Plex Mono\',monospace;font-size:11px;text-transform:uppercase;color:var(--graphite);display:block;margin:0 0 3px;';
+  return `
+    <div class="cartao-topo">
+      <div style="flex:1;min-width:0;">
+        <p class="label" style="margin:0 0 4px;">${t.projetos && t.projetos.nome ? esc(t.projetos.nome) : (t.projeto_id ? 'Tarefa do projeto' : 'Tarefa do escritório')}</p>
+        <input id="cartaoTitulo" class="cartao-titulo" value="${esc(t.titulo)}" onchange="cartaoSalvarTitulo(this)" onkeydown="if(event.key==='Enter'){this.blur();}" />
+      </div>
+      <button type="button" class="cartao-x" title="Fechar" onclick="fecharModalEditar()">✕</button>
+    </div>
+
+    <div class="cartao-grade">
+      <div>
+        <label style="${rot}">Andamento</label>
+        <select onchange="cartaoSalvarStatus(this.value)" style="${campo}">
+          ${QUADRO_STATUS.map(s => `<option value="${s.status}" ${s.status===t.status?'selected':''}>${s.label}</option>`).join('')}
+        </select>
+      </div>
+      ${t.projeto_id ? `
+      <div>
+        <label style="${rot}">Etapa</label>
+        <select onchange="cartaoSalvarCampos({etapa_id:this.value||null})" style="${campo}">${cartaoOpcoes(c.etapas, t.etapa_id, 'Sem etapa')}</select>
+      </div>
+      <div>
+        <label style="${rot}">Ambiente</label>
+        <select onchange="cartaoSalvarCampos({ambiente_id:this.value||null})" style="${campo}">${cartaoOpcoes(c.ambientes, t.ambiente_id, 'Sem ambiente')}</select>
+      </div>` : ''}
+      <div>
+        <label style="${rot}">Início</label>
+        <input type="date" value="${t.data_inicio||''}" onchange="cartaoSalvarCampos({data_inicio:this.value||null})" style="${campo}" />
+      </div>
+      <div>
+        <label style="${rot}">Prazo</label>
+        <input type="date" value="${t.prazo||''}" onchange="cartaoSalvarCampos({prazo:this.value||null})" style="${campo}" />
+      </div>
+    </div>
+    ${(!t.prazo && t.etapa_id) ? '<p class="muted" style="font-size:11.5px;margin:-4px 0 10px;">Sem prazo próprio: usa a data de fim da etapa, se ela tiver.</p>' : ''}
+
+    <label style="${rot}">Responsáveis</label>
+    <div id="cartaoResp" class="chip-select">${cartaoRespHTML()}</div>
+
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--graphite);margin:0 0 14px;">
+      <input type="checkbox" ${t.terceirizado?'checked':''} onchange="cartaoSalvarCampos({terceirizado:this.checked})" /> Terceirizado
+    </label>
+
+    ${c.schema ? `
+      <label style="${rot}">Observação</label>
+      <textarea rows="3" placeholder="Anotações, links, o que combinou..." onchange="cartaoSalvarCampos({observacao:this.value.trim()||null})" style="${campo}resize:vertical;margin-bottom:14px;">${esc(t.observacao||'')}</textarea>
+
+      <div id="cartaoChecklist" class="cartao-secao">${cartaoChecklistHTML()}</div>
+    ` : `<p class="muted" style="font-size:12px;margin:0 0 14px;">Observação e lista de itens ficam disponíveis depois de rodar o <b>atualizacao-schema-43.sql</b> no Supabase.</p>`}
+
+    <div class="cartao-secao">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <p class="label" style="margin:0;">Tempo total nessa tarefa</p>
+        <p class="mono" style="font-size:15px;font-weight:600;color:var(--terracotta);margin:0;">${fmtHoras(totalSegundos)}</p>
+      </div>
+      ${c.registrosTempo.length > 0
+        ? `<p class="muted" style="font-size:11.5px;margin:6px 0 0;">Somado de ${c.registrosTempo.length} sessão${c.registrosTempo.length>1?'ões':''} de cronômetro${c.registrosTempo.some(r=>!r.fim)?' · uma em andamento agora':''}</p>`
+        : '<p class="muted" style="font-size:12.5px;margin:6px 0 0;">Nenhum registro de cronômetro ainda.</p>'}
+    </div>
+
+    <div class="cartao-secao">
+      <p class="label" style="margin-bottom:10px;">Comentários</p>
+      <div style="margin-bottom:10px;max-height:180px;overflow-y:auto;">
+        ${c.comentarios.length===0
+          ? '<p class="muted" style="font-size:12.5px;">Nenhum comentário ainda.</p>'
+          : c.comentarios.map(m => `
+            <div style="margin-bottom:10px;">
+              <p style="font-size:12px;margin:0;"><b>${esc(m.autor_nome)}</b> <span style="color:var(--graphite);">${new Date(m.criado_em).toLocaleDateString('pt-BR')} ${new Date(m.criado_em).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span></p>
+              <p style="font-size:13px;margin:2px 0 0;">${esc(m.texto)}</p>
+            </div>`).join('')}
+      </div>
+      <form onsubmit="adicionarComentarioTarefa(event,'${c.id}')">
+        <input id="comAutor" required value="${esc(nomeSalvoComentario)}" placeholder="Seu nome" style="${campo}padding:7px 9px;margin-bottom:6px;font-size:12.5px;" />
+        <div style="display:flex;gap:6px;">
+          <input id="comTexto" required placeholder="Escrever um comentário..." style="${campo}flex:1;width:auto;padding:7px 9px;font-size:12.5px;" />
+          <button class="btn" style="padding:7px 12px;font-size:11.5px;">Enviar</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="cartao-rodape">
+      <button type="button" class="btn-ghost" style="font-size:12px;" onclick="arquivarTarefa('${c.id}')">Arquivar</button>
+      <button type="button" class="remove-link" onclick="cartaoExcluir()">Excluir cartão</button>
+      <button type="button" class="btn" style="margin-left:auto;" onclick="fecharModalEditar()">Pronto</button>
+    </div>`;
+}
+
+function cartaoRespHTML(){
+  const c = window._cartao;
+  if(c.equipe.length === 0) return '<span class="muted" style="font-size:12.5px;">Nenhuma pessoa cadastrada na equipe.</span>';
+  return c.equipe.map(m => `<button type="button" class="chip${c.resp.has(m.id)?' on':''}" onclick="cartaoAlternarResp('${m.id}')">${esc(m.nome)}</button>`).join('');
+}
+
+/* Tudo que muda na janela passa por aqui: grava, espelha no quadro e marca as outras telas pra atualizar */
+async function cartaoSalvarCampos(campos){
+  const c = window._cartao;
+  if(!c) return false;
+  Object.assign(c.tarefa, campos);
+  const r = await sb.from('tarefas').update(campos).eq('id', c.id);
+  if(checarErro(r, 'salvar cartão')) return false;
+  quadroAplicarLocal(c.id, campos);
+  cartaoMarcarAlterado(c);
+  return true;
+}
+/* Marca que o cartão mudou, pra atualizar as outras telas quando a janela fechar.
+   Se a janela já fechou (ex.: clicou no X logo depois de editar), atualiza na hora. */
+function cartaoMarcarAlterado(c){
+  window._cartaoAlterado = true;
+  if(window._cartao !== c){ window._cartaoAlterado = false; recarregarAposEdicao(); }
+}
+function cartaoSalvarTitulo(input){
+  const titulo = input.value.trim();
+  if(!titulo){ if(window._cartao) input.value = window._cartao.tarefa.titulo; return; }
+  cartaoSalvarCampos({ titulo });
+}
+function cartaoSalvarStatus(status){
+  const feito = status === 'concluida';
+  cartaoSalvarCampos({ status, concluida_em: feito ? new Date().toISOString() : null });
+}
+async function cartaoAlternarResp(equipeId){
+  const c = window._cartao;
+  const tinha = c.resp.has(equipeId);
+  if(tinha) c.resp.delete(equipeId); else c.resp.add(equipeId);
+  const pintarResp = () => { const el = document.getElementById('cartaoResp'); if(el && window._cartao === c) el.innerHTML = cartaoRespHTML(); };
+  pintarResp();
+  const r = tinha
+    ? await sb.from('tarefas_responsaveis').delete().eq('tarefa_id', c.id).eq('equipe_id', equipeId)
+    : await sb.from('tarefas_responsaveis').insert({ tarefa_id: c.id, equipe_id: equipeId });
+  if(checarErro(r, 'mudar responsável')){
+    if(tinha) c.resp.add(equipeId); else c.resp.delete(equipeId);
+    pintarResp();
+    return;
+  }
+  quadro.resp.set(c.id, [...c.resp]);
+  quadroAplicarLocal(c.id, {});
+  cartaoMarcarAlterado(c);
+}
+async function cartaoExcluir(){
+  const id = window._cartao.id;
+  await excluirComConfirmacao('tarefas', id, 'esse cartão (e a lista de itens dele)', () => {
+    window._cartaoAlterado = false;
+    fecharModalEditar();
+    recarregarAposEdicao();
+  });
+}
+
+/* ---- Lista de itens dentro do cartão ---- */
+function cartaoChecklistHTML(){
+  const c = window._cartao;
+  const feitos = c.itens.filter(i => i.feito).length;
+  const pct = c.itens.length ? Math.round(feitos / c.itens.length * 100) : 0;
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <p class="label" style="margin:0;">Lista de itens</p>
+      <span class="mono" style="font-size:11.5px;color:var(--graphite);">${feitos}/${c.itens.length}</span>
+    </div>
+    ${c.itens.length ? `<div class="bar" style="margin-bottom:8px;"><div style="width:${pct}%"></div></div>` : ''}
+    <div id="cartaoItens" ondragover="cartaoItemDragOver(event)" ondrop="cartaoItemDrop(event)">
+      ${c.itens.map(i => `
+        <div class="cartao-item${i.feito?' feito':''}" data-id="${i.id}">
+          <span class="cartao-alca" draggable="true" title="Arrastar para mudar a ordem" ondragstart="cartaoItemDragStart(event,'${i.id}')" ondragend="cartaoItemDragEnd(event)">⋮⋮</span>
+          <input type="checkbox" ${i.feito?'checked':''} onchange="cartaoAlternarItem('${i.id}', this.checked)" />
+          <input class="cartao-item-texto" value="${esc(i.texto)}" onchange="cartaoSalvarTextoItem('${i.id}', this)" />
+          <button type="button" class="remove-link" title="Remover item" onclick="cartaoRemoverItem('${i.id}')">×</button>
+        </div>`).join('')}
+    </div>
+    <textarea id="cartaoNovoItem" rows="1" class="cartao-novo-item" placeholder="+ Adicionar item (Enter para salvar, cole várias linhas para criar vários)" onkeydown="cartaoTeclaItem(event)"></textarea>
+    <button type="button" class="btn-ghost" style="font-size:11.5px;padding:4px 0;" onclick="cartaoAplicarModelo()">+ itens do checklist de conferência</button>`;
+}
+function cartaoRenderChecklist(){
+  const el = document.getElementById('cartaoChecklist');
+  if(!el) return;
+  const rascunho = (document.getElementById('cartaoNovoItem')||{}).value || '';
+  const tinhaFoco = document.activeElement && document.activeElement.id === 'cartaoNovoItem';
+  el.innerHTML = cartaoChecklistHTML();
+  const ta = document.getElementById('cartaoNovoItem');
+  if(ta){ ta.value = rascunho; if(tinhaFoco) ta.focus(); }
+}
+function cartaoItensParaQuadro(c){
+  quadroAplicarLocal(c.id, { itens: c.itens.map(i => ({ id: i.id, feito: i.feito })) });
+  cartaoMarcarAlterado(c);
+}
+function cartaoTeclaItem(e){
+  if(e.key === 'Enter' && !e.shiftKey){
+    e.preventDefault();
+    const ta = e.target, texto = ta.value;
+    ta.value = '';
+    cartaoAdicionarItens(texto);
+  } else if(e.key === 'Escape'){ e.target.value = ''; e.target.blur(); }
+}
+async function cartaoAdicionarItens(textos){
+  const c = window._cartao;
+  if(!c) return;
+  const lista = (Array.isArray(textos) ? textos : String(textos||'').split(/\n+/)).map(s => String(s).trim()).filter(Boolean);
+  if(lista.length === 0) return;
+  let ordem = c.itens.reduce((m, i) => Math.max(m, i.ordem || 0), 0);
+  const linhas = lista.map(texto => ({ tarefa_id: c.id, texto, ordem: (ordem += 10) }));
+  const r = await sb.from('tarefa_itens').insert(linhas).select('*');
+  if(checarErro(r, 'adicionar item')) return;
+  c.itens.push(...(r.data||[]));
+  cartaoRenderChecklist();
+  cartaoItensParaQuadro(c);
+}
+async function cartaoAlternarItem(id, feito){
+  const c = window._cartao;
+  const item = c.itens.find(i => i.id === id);
+  if(!item) return;
+  item.feito = feito;
+  cartaoRenderChecklist();
+  cartaoItensParaQuadro(c);
+  const r = await sb.from('tarefa_itens').update({ feito }).eq('id', id);
+  if(checarErro(r, 'marcar item')){ item.feito = !feito; cartaoRenderChecklist(); cartaoItensParaQuadro(c); }
+}
+async function cartaoSalvarTextoItem(id, input){
+  const c = window._cartao;
+  const item = c.itens.find(i => i.id === id);
+  const texto = input.value.trim();
+  if(!item) return;
+  if(!texto){ input.value = item.texto; return; }
+  item.texto = texto;
+  const r = await sb.from('tarefa_itens').update({ texto }).eq('id', id);
+  checarErro(r, 'editar item');
+}
+async function cartaoRemoverItem(id){
+  const c = window._cartao;
+  const anterior = c.itens.slice();
+  c.itens = c.itens.filter(i => i.id !== id);
+  cartaoRenderChecklist();
+  cartaoItensParaQuadro(c);
+  const r = await sb.from('tarefa_itens').delete().eq('id', id);
+  if(checarErro(r, 'remover item')){ c.itens = anterior; cartaoRenderChecklist(); cartaoItensParaQuadro(c); }
+}
+async function cartaoAplicarModelo(){
+  const c = window._cartao;
+  if(!c) return;
+  const { data: modelo } = await sb.from('checklist_modelo_itens').select('titulo').order('ordem');
+  if(!modelo || modelo.length === 0){
+    alert('Ainda não tem nenhum item no checklist de conferência.\nCadastre em Configurações → Checklist de conferência.');
+    return;
+  }
+  const jaTem = new Set(c.itens.map(i => i.texto));
+  const novos = modelo.map(m => m.titulo).filter(tt => !jaTem.has(tt));
+  if(novos.length === 0){ alert('Esse cartão já tem todos os itens do checklist de conferência.'); return; }
+  await cartaoAdicionarItens(novos);
+}
+
+/* Reordenar os itens arrastando pela alça ⋮⋮ */
+let _cartaoItemArrastado = null;
+function cartaoItemDragStart(e, id){
+  _cartaoItemArrastado = id;
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', id); } catch(_) {}
+  const linha = e.currentTarget.closest('.cartao-item');
+  if(linha){ try { e.dataTransfer.setDragImage(linha, 10, 10); } catch(_) {} linha.classList.add('dragging'); }
+}
+function cartaoItemDragEnd(){
+  _cartaoItemArrastado = null;
+  document.querySelectorAll('.cartao-item.dragging, .cartao-item.drop-marca').forEach(el => el.classList.remove('dragging','drop-marca'));
+}
+function cartaoItemSobOPonteiro(y){
+  for(const el of document.querySelectorAll('#cartaoItens .cartao-item:not(.dragging)')){
+    const caixa = el.getBoundingClientRect();
+    if(y < caixa.top + caixa.height/2) return el;
+  }
+  return null;
+}
+function cartaoItemDragOver(e){
+  if(!_cartaoItemArrastado) return;
+  e.preventDefault();
+  document.querySelectorAll('.cartao-item.drop-marca').forEach(el => el.classList.remove('drop-marca'));
+  const alvo = cartaoItemSobOPonteiro(e.clientY);
+  if(alvo) alvo.classList.add('drop-marca');
+}
+async function cartaoItemDrop(e){
+  e.preventDefault();
+  const id = _cartaoItemArrastado;
+  _cartaoItemArrastado = null;
+  if(!id) return;
+  const c = window._cartao;
+  const alvo = cartaoItemSobOPonteiro(e.clientY);
+  const ids = c.itens.map(i => i.id).filter(x => x !== id);
+  const pos = alvo ? ids.indexOf(alvo.dataset.id) : ids.length;
+  ids.splice(pos < 0 ? ids.length : pos, 0, id);
+  const porId = new Map(c.itens.map(i => [i.id, i]));
+  const escritas = [];
+  ids.forEach((iid, idx) => {
+    const item = porId.get(iid);
+    if(item && item.ordem !== (idx+1) * 10){ item.ordem = (idx+1) * 10; escritas.push(sb.from('tarefa_itens').update({ ordem: item.ordem }).eq('id', iid)); }
+  });
+  c.itens = ids.map(iid => porId.get(iid));
+  cartaoRenderChecklist();
+  const resultados = await Promise.all(escritas);
+  const falhou = resultados.find(r => r && r.error);
+  if(falhou) checarErro(falhou, 'reordenar itens');
+}
+
 
 /* ---- Financeiro do projeto ---- */
 function somaMeses(dataStr, n){
@@ -1534,22 +2262,30 @@ async function loadTarefas(){
   // "true" preserva a opção "Tarefa do escritório (sem projeto)" no seletor —
   // sem isso, toda tarefa criada aqui sem querer ia parar dentro do primeiro
   // projeto da lista (em ordem alfabética) e sumia do painel de tarefas do escritório.
-  document.getElementById('ntProjeto').dataset.opcional = 'true';
-  await preencherSelectProjetos('ntProjeto');
+  const selNtProjeto = document.getElementById('ntProjeto');
+  selNtProjeto.dataset.opcional = 'true';
+  const projetoSelecionadoAntes = selNtProjeto.value;
+  const responsaveisMarcadosAntes = new Set([...document.querySelectorAll('#ntResponsaveis .chip.on')].map(c => c.dataset.id));
 
-  const { data: equipe } = await sb.from('equipe').select('id,nome').eq('ativo', true).order('nome');
-  window._equipeAtiva = equipe || [];
-  document.getElementById('ntResponsaveis').innerHTML = (equipe||[]).map(m =>
-    `<button type="button" class="chip" data-id="${m.id}" onclick="this.classList.toggle('on')">${esc(m.nome)}</button>`
-  ).join('');
-
-  const [{ data: tarefas }, { data: responsaveis }, { data: temposAbertos }, { data: todasEtapas }, { data: temposFechados }] = await Promise.all([
-    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,data_inicio,projeto_id,etapa_id,ambiente_id,ordem_manual,concluida_em,criado_em,projetos(nome),ambientes(nome)').eq('arquivada', false).order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
+  // Tudo numa ida só ao servidor (antes eram 4 em fila, e cada arrastada no Kanban
+  // esperava isso tudo antes de a tela mudar — dava a sensação de travado).
+  const carregandoProjetos = preencherSelectProjetos('ntProjeto');
+  const s43 = await temSchema43();
+  const [{ data: equipe }, { data: tarefas }, { data: responsaveis }, { data: temposAbertos }, { data: todasEtapas }, { data: temposFechados }] = await Promise.all([
+    sb.from('equipe').select('id,nome').eq('ativo', true).order('nome'),
+    sb.from('tarefas').select('id,titulo,status,terceirizado,prazo,data_inicio,projeto_id,etapa_id,ambiente_id,ordem_manual,concluida_em,criado_em,' + (s43 ? 'cartao,' : '') + 'projetos(nome),ambientes(nome)').eq('arquivada', false).order('ordem_manual',{ascending:true,nullsFirst:false}).order('criado_em',{ascending:true}),
     sb.from('tarefas_responsaveis').select('tarefa_id,equipe_id,equipe(nome)'),
     sb.from('tarefas_tempo').select('id,tarefa_id,etapa_id,equipe_id,inicio,equipe(nome)').is('fim', null),
     sb.from('etapas').select('id,nome,data_fim'),
     sb.from('tarefas_tempo').select('tarefa_id,duracao_segundos').not('duracao_segundos','is',null),
   ]);
+  await carregandoProjetos;
+  // O recarregamento refaz o seletor e os chips; devolve o que a pessoa já tinha escolhido no formulário
+  if(projetoSelecionadoAntes && [...selNtProjeto.options].some(o => o.value === projetoSelecionadoAntes)) selNtProjeto.value = projetoSelecionadoAntes;
+  window._equipeAtiva = equipe || [];
+  document.getElementById('ntResponsaveis').innerHTML = (equipe||[]).map(m =>
+    `<button type="button" class="chip${responsaveisMarcadosAntes.has(String(m.id)) ? ' on' : ''}" data-id="${m.id}" onclick="this.classList.toggle('on')">${esc(m.nome)}</button>`
+  ).join('');
   window._etapaNomeGlobalMap = new Map((todasEtapas||[]).map(e => [e.id, e.nome]));
   window._etapaPrazoMap = new Map((todasEtapas||[]).map(e => [e.id, e.data_fim]));
 
@@ -1637,7 +2373,10 @@ async function loadTarefas(){
     alertaEl.classList.add('hidden');
   }
 
-  renderTarefas();
+  // Se a pessoa começou a arrastar outro card enquanto isso carregava, redesenhar a tela
+  // agora cancelaria o arrasto dela — espera ela soltar.
+  if(arrastoEmAndamento()) _renderAdiado = true;
+  else renderTarefas();
 }
 
 function filtrarTarefas(filtro){
@@ -1707,7 +2446,7 @@ function renderKanbanTarefas(){
     const gruposEtapa = new Map();
     const individuais = [];
     itens.forEach(t => {
-      if(t.etapa_id){
+      if(t.etapa_id && !t.cartao){   // cartões do quadro novo aparecem um a um; só o checklist antigo se junta por etapa
         if(!gruposEtapa.has(t.etapa_id)){
           gruposEtapa.set(t.etapa_id, {
             etapaId: t.etapa_id,
@@ -1830,14 +2569,37 @@ function renderKanbanTarefas(){
 /* Arrastar e soltar no kanban (computador; no celular use os botões "→").
    Arrastar entre colunas muda o status; arrastar dentro da coluna reordena. */
 let _tarefaArrastadaId = null;
+let _arrastoDesde = 0;      // quando o arrasto atual começou (0 = ninguém arrastando)
+let _renderAdiado = false;  // um recarregamento terminou durante o arrasto e a tela ficou pra depois
+/* "Arrastando" expira em 30s por segurança: se por algum motivo o navegador não avisar
+   que o arrasto terminou, a tela não pode ficar congelada pra sempre. */
+function arrastoEmAndamento(){ return _arrastoDesde > 0 && (Date.now() - _arrastoDesde) < 30000; }
+function arrastoTerminou(){
+  _arrastoDesde = 0;
+  if(_renderAdiado){ _renderAdiado = false; renderTarefas(); }
+}
 function dragStartTarefa(e, id){
   _tarefaArrastadaId = id;
+  _arrastoDesde = Date.now();
   e.dataTransfer.effectAllowed = 'move';
   e.currentTarget.classList.add('dragging');
 }
 function dragEndTarefa(e){
   e.currentTarget.classList.remove('dragging');
   document.querySelectorAll('.drop-marca').forEach(el => el.classList.remove('drop-marca'));
+  arrastoTerminou();
+}
+
+/* Ordena a lista em memória do mesmo jeito que o banco (ordem manual, vazios por último,
+   desempate pela data de criação) — pra tela já mostrar a nova ordem sem esperar o servidor. */
+function reordenarTarefasEmMemoria(){
+  (window._tarefas||[]).sort((a,b) => {
+    const x = a.ordem_manual, y = b.ordem_manual;
+    if(x==null && y!=null) return 1;
+    if(x!=null && y==null) return -1;
+    if(x!==y && x!=null) return x - y;
+    return String(a.criado_em||'').localeCompare(String(b.criado_em||''));
+  });
 }
 function dragOverColuna(e, col){
   e.preventDefault();
@@ -1867,6 +2629,8 @@ async function dropColuna(e, status, col){
 
   const id = _tarefaArrastadaId;
   _tarefaArrastadaId = null;
+  _arrastoDesde = 0;
+  _renderAdiado = false; // vamos redesenhar já, logo abaixo
 
   // Descobre a nova posição dentro da coluna
   const cardAlvo = cardSobOPonteiro(col, e.clientY);
@@ -1877,20 +2641,36 @@ async function dropColuna(e, status, col){
   const posicao = cardAlvo ? idsNaColuna.indexOf(cardAlvo.dataset.tarefaId) : idsNaColuna.length;
   idsNaColuna.splice(posicao < 0 ? idsNaColuna.length : posicao, 0, id);
 
-  // Regrava a ordem de toda a coluna (espaçado de 100 em 100 pra sobrar folga)
-  const atualizacoes = idsNaColuna.map((tid, i) =>
-    sb.from('tarefas').update({ ordem_manual: (i+1) * 100 }).eq('id', tid)
-  );
+  // Monta só o que de fato mudou (ordem da coluna espaçada de 100 em 100 pra sobrar folga,
+  // e o status do card arrastado). Uma gravação por tarefa, não duas.
+  const porId = new Map((window._tarefas||[]).map(t => [t.id, t]));
+  const escritas = [];
+  idsNaColuna.forEach((tid, i) => {
+    const t = porId.get(tid);
+    if(!t) return;
+    const mudancas = {};
+    if(t.ordem_manual !== (i+1) * 100) mudancas.ordem_manual = (i+1) * 100;
+    if(tid === id && t.status !== status){
+      mudancas.status = status;
+      if(status==='concluida') mudancas.concluida_em = new Date().toISOString();
+    }
+    if(Object.keys(mudancas).length === 0) return;
+    Object.assign(t, mudancas);          // já vale na tela, sem esperar o servidor
+    escritas.push({ tid, mudancas });
+  });
 
-  const tarefa = (window._tarefas||[]).find(t => t.id === id);
-  if(tarefa && tarefa.status !== status){
-    const mudancas = { status };
-    if(status==='concluida') mudancas.concluida_em = new Date().toISOString();
-    atualizacoes.push(sb.from('tarefas').update(mudancas).eq('id', id));
+  reordenarTarefasEmMemoria();
+  renderTarefas();
+  if(escritas.length === 0) return;
+
+  const resultados = await Promise.all(escritas.map(w => sb.from('tarefas').update(w.mudancas).eq('id', w.tid)));
+  const falhou = resultados.find(r => r && r.error);
+  if(falhou){
+    checarErro(falhou, 'mover tarefa');
+    loadTarefas();   // desfaz a mudança otimista mostrando o que realmente está salvo
+    return;
   }
-
-  await Promise.all(atualizacoes);
-  loadTarefas();
+  loadTarefas();     // em segundo plano: atualiza avisos de prazo e totais
 }
 
 const STATUS_PILL_COR = { pendente:'var(--clay)', em_andamento:'var(--terracotta)', concluida:'var(--sage)' };
@@ -1980,8 +2760,10 @@ async function criarTarefaGlobal(e){
 async function moverTarefaKanban(id, status){
   const mudancas = { status };
   if(status==='concluida') mudancas.concluida_em = new Date().toISOString();
+  const t = (window._tarefas||[]).find(x => x.id === id);
+  if(t){ Object.assign(t, mudancas); renderTarefas(); }   // muda na tela na hora
   const r = await sb.from('tarefas').update(mudancas).eq('id', id);
-  if(checarErro(r, 'mover tarefa')) return;
+  if(checarErro(r, 'mover tarefa')){ loadTarefas(); return; }
   loadTarefas();
 }
 async function excluirTarefaKanban(id){
@@ -2232,7 +3014,11 @@ async function iniciarCronometro(tarefaId){
   carregarCronometrosGlobais();
 }
 async function trazerTarefaParaTopo(tarefaId){
-  await sb.from('tarefas').update({ ordem_manual: -Date.now() }).eq('id', tarefaId);
+  const ordem = -Date.now();
+  const t = (window._tarefas||[]).find(x => x.id === tarefaId);
+  if(t){ t.ordem_manual = ordem; reordenarTarefasEmMemoria(); renderTarefas(); }
+  const resultado = await sb.from('tarefas').update({ ordem_manual: ordem }).eq('id', tarefaId);
+  checarErro(resultado, 'trazer tarefa para o topo');
   loadTarefas();
 }
 async function pararCronometro(tempoId){
@@ -3491,15 +4277,28 @@ async function duplicarAmbiente(ambienteId, nomeAtual){
 
   // Pega o checklist inteiro do ambiente original (em todas as etapas) e recria no novo,
   // zerado (pendente), já que é um ambiente novo.
-  const { data: itensOrigem } = await sb.from('tarefas').select('titulo, etapa_id').eq('ambiente_id', ambienteId);
+  const s43 = await temSchema43();
+  const { data: itensOrigem } = await sb.from('tarefas').select('id, titulo, etapa_id' + (s43 ? ', cartao, observacao, terceirizado, tarefa_itens(texto, ordem)' : '')).eq('ambiente_id', ambienteId).eq('arquivada', false);
   if(itensOrigem && itensOrigem.length > 0){
     const resultado = await sb.from('tarefas').insert(itensOrigem.map(item => ({
       projeto_id: projetoAtualId,
       etapa_id: item.etapa_id,
       ambiente_id: novoAmbiente.id,
       titulo: item.titulo,
-    })));
+      ...(s43 ? { cartao: !!item.cartao, observacao: item.observacao || null, terceirizado: !!item.terceirizado } : {}),
+    }))).select('id');
     if(checarErro(resultado, 'copiar checklist do ambiente')) return;
+    // a lista de itens de dentro de cada cartão também vem junto (zerada)
+    if(s43){
+      const linhas = [];
+      (resultado.data||[]).forEach((nova, i) => {
+        (itensOrigem[i].tarefa_itens||[]).forEach(it => linhas.push({ tarefa_id: nova.id, texto: it.texto, ordem: it.ordem || 0 }));
+      });
+      if(linhas.length){
+        const ri = await sb.from('tarefa_itens').insert(linhas);
+        if(checarErro(ri, 'copiar itens dos cartões')) return;
+      }
+    }
   }
 
   loadProjetoDetalhe(projetoAtualId);
@@ -3546,89 +4345,42 @@ function fecharModalEditar(){
   const el = document.getElementById('modalEditarConteudo');
   el.innerHTML = '';
   el.classList.remove('modal-box-largo');
+  window._cartao = null;
+  // A janela do cartão salva sozinha; ao fechar, atualiza as outras telas (progresso, Kanban geral)
+  if(window._cartaoAlterado){ window._cartaoAlterado = false; recarregarAposEdicao(); }
 }
 function recarregarAposEdicao(){
   if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
   loadTarefas();
 }
 
-/* ---- Editar tarefa ---- */
-async function abrirModalEditarTarefa(tarefaId){
-  const [{ data: tarefa }, { data: comentarios }, { data: registrosTempo }] = await Promise.all([
-    sb.from('tarefas').select('*').eq('id', tarefaId).single(),
-    sb.from('tarefa_comentarios').select('*').eq('tarefa_id', tarefaId).order('criado_em', { ascending: true }),
-    sb.from('tarefas_tempo').select('id,inicio,fim,duracao_segundos,equipe(nome)').eq('tarefa_id', tarefaId).order('inicio', { ascending: false }),
-  ]);
-  if(!tarefa) return;
-
-  const { data: ambientesProjeto } = await sb.from('ambientes').select('id,nome').eq('projeto_id', tarefa.projeto_id);
-  const nomeSalvoComentario = localStorage.getItem('sami_nome_recado') || '';
-  const totalSegundos = (registrosTempo||[]).reduce((soma, r) => soma + (r.duracao_segundos || 0), 0);
-
+/* ---- Renomear projeto (depois de criado) ---- */
+function abrirModalRenomearProjeto(){
+  if(!projetoAtualId) return;
+  const nomeAtual = document.getElementById('pdNome').textContent;
   abrirModal(`
-    <p class="label" style="margin-bottom:14px;">Editar tarefa</p>
-    <form onsubmit="salvarEdicaoTarefa(event,'${tarefaId}')">
-      <input id="edTarTitulo" required value="${esc(tarefa.titulo)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;" />
-      <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <div style="flex:1;">
-          <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Início</label>
-          <input id="edTarDataInicio" type="date" value="${tarefa.data_inicio || ''}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
-        </div>
-        <div style="flex:1;">
-          <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Prazo</label>
-          <input id="edTarPrazo" type="date" value="${tarefa.prazo || ''}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;" />
-        </div>
-      </div>
-      ${!tarefa.prazo ? '<p class="muted" style="font-size:11.5px;margin:-4px 0 10px;">Sem prazo próprio: essa tarefa usa a data de fim da etapa. Preencha só se essa tarefa tiver um prazo diferente.</p>' : ''}
-      <label class="mono" style="font-size:12px;text-transform:uppercase;color:var(--graphite);">Ambiente</label>
-      <select id="edTarAmbiente" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:10px;">
-        <option value="">Sem ambiente</option>
-        ${(ambientesProjeto||[]).map(a => `<option value="${a.id}" ${a.id===tarefa.ambiente_id?'selected':''}>${esc(a.nome)}</option>`).join('')}
-      </select>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--graphite);margin-bottom:16px;">
-        <input id="edTarTerceirizado" type="checkbox" ${tarefa.terceirizado?'checked':''} /> Terceirizado
-      </label>
-      <div class="form-actions" style="justify-content:space-between;">
-        <div style="display:flex;gap:10px;">
-          <button type="submit" class="btn">Salvar</button>
-          <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
-        </div>
-        <button type="button" class="btn-ghost" style="font-size:12px;color:var(--graphite);" onclick="arquivarTarefa('${tarefaId}')">Arquivar</button>
+    <p class="label" style="margin-bottom:14px;">Renomear projeto</p>
+    <form onsubmit="salvarNomeProjeto(event)">
+      <input id="edProjNome" required value="${esc(nomeAtual)}" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:14px;" />
+      <div class="form-actions">
+        <button type="submit" class="btn">Salvar</button>
+        <button type="button" class="btn-ghost" onclick="fecharModalEditar()">Cancelar</button>
       </div>
     </form>
-
-    <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <p class="label" style="margin:0;">Tempo total nessa tarefa</p>
-        <p class="mono" style="font-size:16px;font-weight:600;color:var(--terracotta);margin:0;">${fmtHoras(totalSegundos)}</p>
-      </div>
-      ${(registrosTempo||[]).length > 0
-        ? `<p class="muted" style="font-size:11.5px;margin:6px 0 0;">Somado de ${registrosTempo.length} sessão${registrosTempo.length>1?'ões':''} de cronômetro${(registrosTempo||[]).some(r=>!r.fim)?' · uma em andamento agora':''}</p>`
-        : '<p class="muted" style="font-size:12.5px;margin:6px 0 0;">Nenhum registro de cronômetro ainda.</p>'}
-    </div>
-
-    <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;">
-      <p class="label" style="margin-bottom:10px;">Comentários</p>
-      <div id="listaComentariosTarefa" style="margin-bottom:10px;max-height:200px;overflow-y:auto;">
-        ${(comentarios||[]).length===0
-          ? '<p class="muted" style="font-size:12.5px;">Nenhum comentário ainda.</p>'
-          : comentarios.map(c => `
-            <div style="margin-bottom:10px;">
-              <p style="font-size:12px;margin:0;"><b>${esc(c.autor_nome)}</b> <span style="color:var(--graphite);font-size:12px;">${new Date(c.criado_em).toLocaleDateString('pt-BR')} ${new Date(c.criado_em).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span></p>
-              <p style="font-size:13px;margin:2px 0 0;">${esc(c.texto)}</p>
-            </div>`).join('')}
-      </div>
-      <form onsubmit="adicionarComentarioTarefa(event,'${tarefaId}')">
-        <input id="comAutor" required value="${esc(nomeSalvoComentario)}" placeholder="Seu nome" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:7px 9px;margin-bottom:6px;font-size:12.5px;" />
-        <div style="display:flex;gap:6px;">
-          <input id="comTexto" required placeholder="Escrever um comentário..." style="flex:1;border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:12.5px;" />
-          <button class="btn" style="padding:7px 12px;font-size:11.5px;">Enviar</button>
-        </div>
-      </form>
-    </div>
   `);
+  setTimeout(() => { const i = document.getElementById('edProjNome'); if(i){ i.focus(); i.select(); } }, 50);
+}
+async function salvarNomeProjeto(e){
+  e.preventDefault();
+  const nome = document.getElementById('edProjNome').value.trim();
+  if(!nome) return;
+  const resultado = await sb.from('projetos').update({ nome }).eq('id', projetoAtualId);
+  if(checarErro(resultado, 'renomear projeto')) return;
+  fecharModalEditar();
+  loadProjetoDetalhe(projetoAtualId);
 }
 
+/* ---- Editar tarefa: janela do cartão (ver quadro de tarefas acima) ---- */
 async function adicionarComentarioTarefa(e, tarefaId){
   e.preventDefault();
   const autor = document.getElementById('comAutor').value.trim();
@@ -3638,20 +4390,6 @@ async function adicionarComentarioTarefa(e, tarefaId){
   const resultado = await sb.from('tarefa_comentarios').insert({ tarefa_id: tarefaId, autor_nome: autor, texto });
   if(checarErro(resultado, 'comentar')) return;
   abrirModalEditarTarefa(tarefaId);
-}
-
-async function salvarEdicaoTarefa(e, tarefaId){
-  e.preventDefault();
-  const resultado = await sb.from('tarefas').update({
-    titulo: document.getElementById('edTarTitulo').value.trim(),
-    prazo: document.getElementById('edTarPrazo').value || null,
-    data_inicio: document.getElementById('edTarDataInicio').value || null,
-    ambiente_id: document.getElementById('edTarAmbiente').value || null,
-    terceirizado: document.getElementById('edTarTerceirizado').checked,
-  }).eq('id', tarefaId);
-  if(checarErro(resultado, 'editar tarefa')) return;
-  fecharModalEditar();
-  recarregarAposEdicao();
 }
 
 /* ---- Editar etapa ---- */
@@ -5912,6 +6650,7 @@ async function arquivarTarefa(id){
   if(!confirm('Arquivar essa tarefa? Ela some do kanban mas continua guardada — o tempo cronometrado e o histórico não se perdem.')) return;
   const r = await sb.from('tarefas').update({ arquivada: true }).eq('id', id);
   if(checarErro(r, 'arquivar tarefa')) return;
+  window._cartaoAlterado = false;
   fecharModalEditar();
   loadTarefas();
   if(projetoAtualId) loadProjetoDetalhe(projetoAtualId);
