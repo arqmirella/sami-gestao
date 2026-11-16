@@ -110,6 +110,12 @@ function toggleForm(id, show){
   else f.classList.toggle('hidden', !show);
 }
 
+/* Menu "⋯" do projeto: fecha ao clicar fora */
+document.addEventListener('click', e => {
+  const menu = document.getElementById('pdMenu');
+  if(menu && menu.open && !menu.contains(e.target)) menu.open = false;
+});
+
 /* ---------------- INIT / AUTH ---------------- */
 window.addEventListener('DOMContentLoaded', () => {
   if(SUPABASE_URL.startsWith('COLE_AQUI') || SUPABASE_ANON_KEY.startsWith('COLE_AQUI')){
@@ -817,6 +823,10 @@ function trocarAbaProjeto(tab){
   abaProjetoAtual = tab;
   document.querySelectorAll('.pd-tabcontent').forEach(el => el.classList.toggle('hidden', el.id !== 'pdtab-'+tab));
   document.querySelectorAll('.pd-tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab===tab));
+  const faixaDados = document.getElementById('pdDadosWrap');
+  if(faixaDados) faixaDados.classList.toggle('fora-geral', tab !== 'geral');
+  const abaAtiva = document.querySelector('.pd-tab.on');
+  if(abaAtiva && abaAtiva.scrollIntoView) abaAtiva.scrollIntoView({ inline:'center', block:'nearest' });
   if(tab==='tarefas') loadQuadroProjeto();
   if(tab==='anexos') loadAnexos();
   if(tab==='orcamentos') loadOrcamentosProjeto();
@@ -826,6 +836,200 @@ function trocarAbaProjeto(tab){
   if(tab==='briefing') loadBriefing();
   if(tab==='checklist') loadChecklistRevisao();
   if(tab==='aprovacoes'){ loadAprovacoes(); loadGaleria3D(); }
+}
+
+/* ---------- Visão geral do projeto: faixa de dados, linha do tempo, compromissos ---------- */
+function inicioDeHojeISO(){
+  const d = new Date(); d.setHours(0,0,0,0);
+  return d.toISOString();
+}
+/* "03/09" no ano corrente, "03/09/27" em outro ano */
+function fmtDataCurta(iso){
+  if(!iso) return '';
+  const d = new Date(String(iso).slice(0,10)+'T00:00:00');
+  const base = d.toLocaleDateString('pt-BR',{ day:'2-digit', month:'2-digit' });
+  return d.getFullYear() === new Date().getFullYear() ? base : `${base}/${String(d.getFullYear()).slice(2)}`;
+}
+
+function montarFaixaDados(projeto, contrato){
+  const vazio = '<span class="pd-dado-vazio">—</span>';
+  const cel = (rot, valor, cls) => `<div class="pd-dado"><small>${rot}</small><span class="${cls||''}">${valor || vazio}</span></div>`;
+  const cliente = projeto.clientes?.nome_completo || projeto.cliente;
+  const contratoTxt = contrato
+    ? `Gerado${contrato.data_contrato ? ` · ${fmtDataBR(contrato.data_contrato)}` : ''}`
+    : '';
+  return `<div class="pd-dados">
+      ${cel('Cliente', cliente ? esc(cliente) : '')}
+      ${cel('Localização', projeto.localizacao ? esc(projeto.localizacao) : '')}
+      ${cel('Arquiteta responsável', projeto.arquiteta_responsavel ? esc(projeto.arquiteta_responsavel) : '')}
+      ${cel('Início da obra', projeto.data_inicio_obra ? fmtDataBR(projeto.data_inicio_obra) : '')}
+      ${cel('Contrato', contratoTxt ? esc(contratoTxt) : '', contrato ? 'pd-dado-ok' : '')}
+    </div>
+    <button type="button" class="pd-dados-editar" onclick="trocarAbaProjeto('dados')">Editar dados</button>`;
+}
+
+function montarLinhaDoTempo(etapas, ctx){
+  if(etapas.length === 0){
+    return `<p class="muted" style="margin:0 0 12px;">Nenhuma etapa ainda. Cadastre as fases do projeto (ex: Briefing, Estudo preliminar, Anteprojeto) pra acompanhar o andamento aqui.</p>
+      <button type="button" class="btn" onclick="novaEtapaDaLinhaDoTempo()">+ Cadastrar etapas</button>`;
+  }
+  const emAndamento = etapas.filter(e => e.status === 'em_andamento');
+  const proxima = emAndamento.length === 0 ? etapas.find(e => e.status === 'pendente') : null;
+  const atuais = new Set(emAndamento.map(e => e.id));
+  if(proxima) atuais.add(proxima.id);
+
+  const itens = etapas.map((et, i) => {
+    const concluida = et.status === 'concluida';
+    const atual = atuais.has(et.id);
+    const dot = concluida ? '✓' : String(i + 1);
+    const tag = concluida ? '<span class="tl-tag ok">Concluída</span>'
+      : atual ? `<span class="tl-tag at">${et.status==='em_andamento' ? 'Etapa atual' : 'Próxima etapa'}</span>` : '';
+    const mover = et.status === 'em_andamento' ? ''
+      : `<button type="button" class="tl-mover" onclick="moverParaEtapa('${et.id}')">mover pra cá</button>`;
+
+    const partes = [];
+    if(et.data_inicio || et.data_fim) partes.push(`${et.data_inicio ? fmtDataCurta(et.data_inicio) : '?'} → ${et.data_fim ? fmtDataCurta(et.data_fim) : '?'}`);
+    const resp = et.responsavel_id ? ctx.equipeMap.get(et.responsavel_id) : null;
+    if(resp && !concluida) partes.push(`responsável: ${esc(resp)}`);
+    if(concluida){
+      partes.push(et.termo_status === 'assinado'
+        ? `termo assinado${et.termo_assinado_em ? ` em ${fmtDataCurta(dataLocalISO(new Date(et.termo_assinado_em)))}` : ''}`
+        : 'termo ainda não assinado');
+    }
+    const bloqueio = (!concluida && et.bloqueado_por) ? ctx.etapaNomeMap.get(et.bloqueado_por) : null;
+    if(bloqueio && et.status === 'pendente') partes.push(`começa depois de ${esc(bloqueio)}`);
+    if(partes.length === 0 && !concluida) partes.push('sem datas ainda');
+
+    let caixa = '';
+    if(atual){
+      const dela = ctx.tarefas.filter(t => t.etapa_id === et.id);
+      const feitas = dela.filter(t => t.status === 'concluida').length;
+      const pct = dela.length ? Math.round(feitas / dela.length * 100) : 0;
+      let prazoTxt = '';
+      if(et.data_fim){
+        const dias = Math.round((new Date(et.data_fim+'T00:00:00') - ctx.hoje) / 86400000);
+        const rel = dias > 1 ? `faltam ${dias} dias` : dias === 1 ? 'falta 1 dia' : dias === 0 ? 'termina hoje' : `atrasada há ${-dias} dia${dias===-1?'':'s'}`;
+        prazoTxt = `<span>Entrega em ${fmtDataCurta(et.data_fim)}</span><span class="${dias<0?'tl-atraso':''}">${rel}</span>`;
+      }
+      caixa = `<div class="tl-caixa">
+        <div class="tl-caixa-linha">
+          <span>${dela.length ? `${feitas} de ${dela.length} tarefas feitas` : 'Nenhuma tarefa nessa etapa ainda'}</span>
+          <button type="button" class="tl-link" onclick="quadroVerEtapa('${et.id}')">Ver tarefas desta etapa →</button>
+        </div>
+        <div class="bar"><div style="width:${pct}%"></div></div>
+        <div class="tl-caixa-linha">${prazoTxt || '<span class="muted">Sem data de entrega</span>'}</div>
+        ${et.status === 'em_andamento' ? `<div class="tl-caixa-acoes"><button type="button" class="btn-contorno" onclick="concluirEtapaDaLinhaDoTempo('${et.id}')">✓ Concluir etapa</button></div>` : ''}
+      </div>`;
+    }
+
+    return `<div class="tl-item${atual ? ' atual' : ''}${concluida ? ' feita' : ''}">
+      <span class="tl-dot">${dot}</span>
+      <div class="tl-titulo"><b>${esc(et.nome)}</b>${tag}${mover}</div>
+      <p class="tl-meta">${partes.join(' · ')}</p>
+      ${caixa}
+    </div>`;
+  });
+  return `<div class="tl">${itens.join('')}</div>`;
+}
+
+function novaEtapaDaLinhaDoTempo(){
+  trocarAbaProjeto('etapas');
+  const campo = document.getElementById('etNome');
+  if(campo){ campo.scrollIntoView({ block:'center' }); campo.focus(); }
+}
+
+async function concluirEtapaDaLinhaDoTempo(id){
+  await alternarEtapaStatus(id, 'em_andamento');
+}
+
+/* "Mover pra cá": esta etapa vira a etapa atual. A que estava em andamento é concluída
+   (se a nova está à frente) ou volta a pendente (se a nova está atrás). O resto não muda. */
+async function moverParaEtapa(id){
+  const lista = window._etapasProjeto || [];
+  const alvo = lista.find(e => e.id === id);
+  if(!alvo) return;
+  const posAlvo = lista.indexOf(alvo);
+  const outras = lista.filter(e => e.status === 'em_andamento' && e.id !== id);
+  const aConcluir = outras.filter(e => lista.indexOf(e) < posAlvo);
+  const aVoltar = outras.filter(e => lista.indexOf(e) > posAlvo);
+
+  const linhas = [`• "${alvo.nome}" passa a ser a etapa atual (em andamento).`];
+  aConcluir.forEach(e => linhas.push(`• "${e.nome}" fica como concluída.`));
+  aVoltar.forEach(e => linhas.push(`• "${e.nome}" volta para pendente.`));
+  linhas.push('As outras etapas não mudam.');
+  if(!confirm(`Mover o projeto para a etapa "${alvo.nome}"?\n\n${linhas.join('\n')}`)) return;
+
+  let r = await sb.from('etapas').update({ status: 'em_andamento' }).eq('id', id);
+  if(checarErro(r, 'mover para a etapa')) return;
+  for(const e of aConcluir){
+    r = await sb.from('etapas').update({ status: 'concluida' }).eq('id', e.id);
+    if(checarErro(r, 'concluir a etapa anterior')) return;
+  }
+  for(const e of aVoltar){
+    r = await sb.from('etapas').update({ status: 'pendente' }).eq('id', e.id);
+    if(checarErro(r, 'voltar a etapa para pendente')) return;
+  }
+  for(const e of aConcluir) await executarAutomacaoEtapa(e.id);
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+async function marcarTarefaFeitaNaVisaoGeral(id){
+  const r = await sb.from('tarefas').update({ status:'concluida', concluida_em:new Date().toISOString() }).eq('id', id);
+  if(checarErro(r, 'marcar tarefa como feita')) return;
+  loadProjetoDetalhe(projetoAtualId);
+}
+
+function renderCompromissosProjeto(lista){
+  const el = document.getElementById('compromissosProjeto');
+  if(!el) return;
+  const itens = lista || [];
+  if(itens.length === 0){
+    el.innerHTML = '<p class="muted" style="margin:0;font-size:13px;">Nenhum compromisso marcado pra esse projeto. Reuniões, visitas e entregas combinadas aparecem aqui.</p>';
+    return;
+  }
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const LIMITE = 4;
+  el.innerHTML = itens.slice(0, LIMITE).map(c => {
+    const d = new Date(c.data_hora);
+    const dia = new Date(d); dia.setHours(0,0,0,0);
+    const dias = Math.round((dia - hoje) / 86400000);
+    const quando = dias === 0 ? 'Hoje' : dias === 1 ? 'Amanhã' : dias > 1 && dias <= 7 ? `em ${dias} dias` : '';
+    const semana = d.toLocaleDateString('pt-BR',{ weekday:'long' }).replace('-feira','');
+    const data = d.toLocaleDateString('pt-BR',{ day:'2-digit', month:'2-digit' });
+    const hora = d.toLocaleTimeString('pt-BR',{ hour:'2-digit', minute:'2-digit' });
+    return `<div class="comp-item">
+      <div class="comp-info">
+        <p class="comp-titulo">${esc(c.titulo)}</p>
+        <p class="comp-meta">${semana}, ${data} · ${hora}${c.local ? ` · ${esc(c.local)}` : ''}</p>
+      </div>
+      <div class="comp-lado">
+        ${quando ? `<span class="comp-quando${dias===0?' hoje':''}">${quando}</span>` : ''}
+        <button type="button" class="remove-link" onclick="excluirCompromissoProjeto('${c.id}')">remover</button>
+      </div>
+    </div>`;
+  }).join('') + (itens.length > LIMITE ? `<p class="muted" style="font-size:12px;margin:2px 0 0;">+ ${itens.length-LIMITE} na agenda</p>` : '');
+}
+
+async function recarregarCompromissosProjeto(){
+  const { data } = await sb.from('compromissos').select('id,titulo,data_hora,local').eq('projeto_id', projetoAtualId).gte('data_hora', inicioDeHojeISO()).order('data_hora', { ascending: true });
+  renderCompromissosProjeto(data);
+}
+
+async function adicionarCompromissoProjeto(e){
+  e.preventDefault();
+  const titulo = document.getElementById('cpjTitulo').value.trim();
+  const dataHora = document.getElementById('cpjDataHora').value;
+  const local = document.getElementById('cpjLocal').value.trim();
+  if(!titulo || !dataHora) return;
+  const r = await sb.from('compromissos').insert({ titulo, projeto_id: projetoAtualId, data_hora: new Date(dataHora).toISOString(), local: local || null });
+  if(checarErro(r, 'salvar compromisso')) return;
+  e.target.reset();
+  toggleForm('formCompromissoProjeto', false);
+  recarregarCompromissosProjeto();
+}
+
+async function excluirCompromissoProjeto(id){
+  await excluirComConfirmacao('compromissos', id, 'esse compromisso', () => recarregarCompromissosProjeto());
 }
 
 async function loadProjetoDetalhe(projetoId, abaAlvo){
@@ -839,7 +1043,8 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
     { data: projeto }, { data: etapas }, { data: tarefas }, { data: parcelas },
     { data: responsaveis }, { data: equipe }, { data: visitas }, { data: relatorios }, { data: execEtapas },
     { data: ambientes }, { data: rentabilidade },
-    { data: temposEtapaAbertos }, { data: temposEtapaFechados }, { data: execucaoProjeto }
+    { data: temposEtapaAbertos }, { data: temposEtapaFechados }, { data: execucaoProjeto },
+    { data: compromissosProjeto }, { data: contratosProjeto }
   ] = await Promise.all([
     sb.from('projetos').select('*, clientes(nome_completo)').eq('id', projetoId).single(),
     sb.from('etapas').select('*').eq('projeto_id', projetoId).order('ordem'),
@@ -855,6 +1060,8 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
     sb.from('tarefas_tempo').select('id,etapa_id,equipe_id,inicio,equipe(nome)').not('etapa_id','is',null).is('fim', null),
     sb.from('tarefas_tempo').select('etapa_id,duracao_segundos').not('etapa_id','is',null).not('duracao_segundos','is',null),
     sb.from('v_projetos_execucao').select('percentual_execucao,total_tarefas').eq('projeto_id', projetoId).maybeSingle(),
+    sb.from('compromissos').select('id,titulo,data_hora,local').eq('projeto_id', projetoId).gte('data_hora', inicioDeHojeISO()).order('data_hora', { ascending: true }),
+    sb.from('contratos').select('id,numero_contrato,data_contrato').eq('projeto_id', projetoId).order('criado_em', { ascending: false }).limit(1),
   ]);
   if(!projeto) { navigate('projetos'); return; }
   dadosProjetoAtual = projeto;
@@ -961,56 +1168,91 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
       </div>`;
     }).join('');
 
-  /* ---- Tarefas: resumo na visão geral (o trabalho de verdade fica na aba Tarefas) ---- */
+  /* ---- Tarefas abertas na visão geral (o trabalho de verdade fica na aba Tarefas) ---- */
   const hojeResumo = new Date(); hojeResumo.setHours(0,0,0,0);
   const nAFazer = (tarefas||[]).filter(t => t.status==='pendente').length;
   const nFazendo = (tarefas||[]).filter(t => t.status==='em_andamento').length;
   const nFeitas = (tarefas||[]).filter(t => t.status==='concluida').length;
   const emAberto = (tarefas||[]).filter(t => t.status!=='concluida');
-  const atrasadasResumo = emAberto.filter(t => t.prazo && new Date(t.prazo+'T00:00:00') < hojeResumo);
-  const fazendoResumo = emAberto.filter(t => t.status==='em_andamento' && !atrasadasResumo.includes(t));
-  const linhaResumo = (t, atrasada) => `<div class="resumo-tarefa" onclick="abrirModalEditarTarefa('${t.id}')">
-      <span class="resumo-tarefa-titulo">${esc(t.titulo)}</span>
-      <span class="resumo-tarefa-meta${atrasada?' atraso':''}">${(respPorTarefa.get(t.id)||[]).map(esc).join(', ')}${t.prazo?`${(respPorTarefa.get(t.id)||[]).length?' · ':''}${fmtDataBR(t.prazo)}`:''}</span>
+  const atrasadaT = t => !!(t.prazo && new Date(t.prazo+'T00:00:00') < hojeResumo);
+  const atrasadasResumo = emAberto.filter(atrasadaT);
+  const ordemAberta = t => atrasadaT(t) ? 0 : t.status==='em_andamento' ? 1 : 2;
+  const abertasOrdenadas = emAberto.slice().sort((a,b) =>
+    ordemAberta(a) - ordemAberta(b) || String(a.prazo||'9999-12-31').localeCompare(String(b.prazo||'9999-12-31')));
+  const LIMITE_ABERTAS = 5;
+  const cartaoAberto = t => {
+    const quem = respPorTarefa.get(t.id) || [];
+    const atras = atrasadaT(t);
+    const etapaNome = t.etapa_id ? etapaNomeMap.get(t.etapa_id) : null;
+    const avatares = quem.slice(0,2).map(n => `<span class="ta-av" title="${esc(n)}">${esc(n.trim().charAt(0).toUpperCase())}</span>`).join('');
+    return `<div class="ta-item">
+      <button type="button" class="ta-ck" title="Marcar como feita" aria-label="Marcar como feita" onclick="marcarTarefaFeitaNaVisaoGeral('${t.id}')"></button>
+      <div class="ta-corpo" onclick="abrirModalEditarTarefa('${t.id}')">
+        <p class="ta-titulo">${esc(t.titulo)}</p>
+        <div class="ta-chips">
+          ${t.status==='em_andamento' ? '<span class="ta-chip fazendo">Fazendo</span>' : ''}
+          ${etapaNome ? `<span class="ta-chip etapa">${esc(etapaNome)}</span>` : ''}
+          ${t.ambientes?.nome ? `<span class="ta-chip amb">${esc(t.ambientes.nome)}</span>` : ''}
+          ${t.prazo ? `<span class="ta-chip ${atras?'atraso':'prazo'}">${atras?'atrasada · ':''}${fmtDataBR(t.prazo)}</span>` : ''}
+          ${avatares ? `<span class="ta-avs">${avatares}</span>` : ''}
+        </div>
+      </div>
     </div>`;
-  const blocoLista = (titulo, lista, atrasada) => lista.length === 0 ? '' : `
-    <p class="mono" style="font-size:11.5px;text-transform:uppercase;color:${atrasada?'var(--alert)':'var(--graphite)'};margin:14px 0 6px;">${titulo} (${lista.length})</p>
-    ${lista.slice(0,5).map(t => linhaResumo(t, atrasada)).join('')}
-    ${lista.length>5 ? `<p class="muted" style="font-size:12px;margin:4px 0 0;">+ ${lista.length-5} no quadro</p>` : ''}`;
+  };
+  document.getElementById('tarefasAbertasTitulo').textContent = emAberto.length ? `Tarefas abertas · ${emAberto.length}` : 'Tarefas abertas';
   document.getElementById('resumoTarefasProjeto').innerHTML = (tarefas||[]).length===0
-    ? `<p class="muted" style="margin:0 0 12px;">Nenhuma tarefa ainda.</p>
-       <button type="button" class="btn" onclick="trocarAbaProjeto('tarefas')">Abrir quadro de tarefas →</button>`
-    : `<div class="resumo-contagem">
-         <div><b>${nAFazer}</b><span>A fazer</span></div>
-         <div><b>${nFazendo}</b><span>Fazendo</span></div>
-         <div><b>${nFeitas}</b><span>Feito</span></div>
-       </div>
-       <button type="button" class="btn" style="width:100%;margin-top:10px;" onclick="trocarAbaProjeto('tarefas')">Abrir quadro de tarefas →</button>
-       ${blocoLista('Atrasadas', atrasadasResumo, true)}
-       ${blocoLista('Fazendo agora', fazendoResumo, false)}`;
+    ? `<p class="muted" style="margin:0 0 12px;">Nenhuma tarefa ainda. Crie a primeira no quadro, é só digitar e apertar Enter.</p>
+       <button type="button" class="btn" onclick="trocarAbaProjeto('tarefas')">Ir para o quadro →</button>`
+    : emAberto.length===0
+      ? `<p class="muted" style="margin:0;">Todas as tarefas foram concluídas. 🎉</p>`
+      : `${abertasOrdenadas.slice(0, LIMITE_ABERTAS).map(cartaoAberto).join('')}
+         ${emAberto.length>LIMITE_ABERTAS ? `<p class="muted" style="font-size:12px;margin:2px 0 0;">+ ${emAberto.length-LIMITE_ABERTAS} no quadro</p>` : ''}
+         <p class="resumo-contagem-linha" style="margin-top:10px;">A fazer <b>${nAFazer}</b> · Fazendo <b>${nFazendo}</b> · Feito <b>${nFeitas}</b></p>`;
+
+  /* ---- Linha do tempo (etapas do projeto) ---- */
+  window._etapasProjeto = etapas || [];
+  document.getElementById('linhaDoTempo').innerHTML = montarLinhaDoTempo(etapas||[], { tarefas: tarefas||[], etapaNomeMap, equipeMap, hoje: hojeResumo });
+
+  /* ---- Compromissos do projeto ---- */
+  renderCompromissosProjeto(compromissosProjeto);
+
+  /* ---- Faixa de dados do projeto ---- */
+  document.getElementById('pdDadosWrap').innerHTML = montarFaixaDados(projeto, (contratosProjeto||[])[0]);
 
   /* ---- Financeiro ---- */
   const total = (parcelas||[]).reduce((s,p) => s + Number(p.valor), 0);
-  document.getElementById('pdTotalFinanceiro').textContent = fmtMoeda(total);
+  const parcelasPagas = (parcelas||[]).filter(p => p.status==='pago');
+  const parcelasAbertas = (parcelas||[]).filter(p => p.status!=='pago');
+  const recebido = parcelasPagas.reduce((s,p) => s + Number(p.valor), 0);
+  const parcelasAtrasadas = parcelasAbertas.filter(p => p.vencimento && new Date(p.vencimento+'T00:00:00') < hojeResumo);
+  document.getElementById('pdResumoFinanceiro').innerHTML = total > 0
+    ? `Total ${fmtMoeda(total)} · recebido ${fmtMoeda(recebido)}${parcelasAtrasadas.length ? ` · <span style="color:var(--alert);font-weight:600;">${parcelasAtrasadas.length} atrasada${parcelasAtrasadas.length>1?'s':''}</span>` : ''}`
+    : '';
   document.getElementById('listaParcelasProjeto').innerHTML = (parcelas||[]).length===0
-    ? '<p class="muted">Nenhuma parcela ainda.</p>'
-    : parcelas.map(p => `
-      <div class="task-card" style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <p style="font-size:13.5px;margin:0;">${esc(p.descricao || 'Parcela')}</p>
-          <p style="font-size:12px;color:var(--graphite);margin:2px 0 0;">${fmtMoeda(p.valor)} · ${fmtDataBR(p.vencimento)}</p>
+    ? '<p class="muted" style="margin:14px 0 0;">Nenhuma parcela ainda. Use "Gerar parcelas do contrato" ou lance uma parcela avulsa.</p>'
+    : (total > 0 ? `<div class="fin-barra"><div class="bar"><div style="width:${Math.min(100, Math.round(recebido/total*100))}%;background:var(--sage);"></div></div></div>` : '')
+      + '<div class="parcelas-lista">' + parcelas.map(p => {
+      const atrasada = parcelasAtrasadas.includes(p);
+      const st = p.status==='pago' ? ['Pago','ok'] : atrasada ? ['Atrasada','atraso'] : ['A vencer',''];
+      return `<div class="parcela-linha">
+        <div class="parcela-info">
+          <p class="parcela-desc">${esc(p.descricao || 'Parcela')}</p>
+          <p class="parcela-meta">${fmtMoeda(p.valor)} · ${fmtDataBR(p.vencimento)}</p>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <span class="parcela-st ${st[1]}">${st[0]}</span>
+        <div class="parcela-acoes">
           ${p.status!=='pago'
             ? `<button class="btn-ghost" style="font-size:12px;color:var(--sage);padding:0;" onclick="marcarParcelaProjetoPaga('${p.id}')">marcar pago</button>`
             : `<button class="edit-link" onclick="imprimirRecibo('${p.id}')">recibo</button>`}
           <button class="remove-link" onclick="excluirParcelaProjeto('${p.id}')">remover</button>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('') + '</div>';
 
-  /* ---- Rentabilidade ---- */
+  /* ---- Rentabilidade (recolhida; o resumo aparece na linha de cima) ---- */
   if(rentabilidade){
     const lucro = Number(rentabilidade.recebido) - Number(rentabilidade.despesas) - Number(rentabilidade.custo_horas);
+    document.getElementById('rentResumo').innerHTML = `<span style="color:${lucro>=0?CORES.pago:CORES.atrasado};">${fmtMoeda(lucro)}</span>`;
     document.getElementById('cardRentabilidade').innerHTML = `
       <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="color:var(--graphite);">Recebido</span><span>${fmtMoeda(rentabilidade.recebido)}</span></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="color:var(--graphite);">Despesas do projeto</span><span>− ${fmtMoeda(rentabilidade.despesas)}</span></div>
@@ -1022,8 +1264,19 @@ async function loadProjetoDetalhe(projetoId, abaAlvo){
       <p class="muted" style="font-size:12px;margin:10px 0 0;">Só conta parcelas e despesas já marcadas como pagas, e horas registradas no cronômetro. Cadastre o "custo por hora" de cada pessoa em Equipe pra esse número ficar mais preciso.</p>
     `;
   } else {
+    document.getElementById('rentResumo').textContent = '';
     document.getElementById('cardRentabilidade').innerHTML = '<p class="muted">Sem dados suficientes ainda.</p>';
   }
+
+  /* ---- Cabeçalho (execução) ---- */
+  const totalTarefas = (tarefas||[]).length;
+  const pctExec = (execucaoProjeto && execucaoProjeto.total_tarefas > 0)
+    ? Math.round(Number(execucaoProjeto.percentual_execucao) || 0)
+    : (totalTarefas ? Math.round(nFeitas / totalTarefas * 100) : 0);
+  const etapaAtual = (etapas||[]).find(e => e.status==='em_andamento') || (etapas||[]).find(e => e.status==='pendente');
+  document.getElementById('pdProgresso').innerHTML = (totalTarefas === 0 && !etapaAtual) ? '' : `
+    <div class="pd-prog-barra"><div class="bar"><div style="width:${pctExec}%"></div></div></div>
+    <span class="pd-prog-txt"><b>${pctExec}%</b> executado${totalTarefas ? ` · ${nFeitas} de ${totalTarefas} tarefas` : ''}${etapaAtual ? ` · etapa atual: <b>${esc(etapaAtual.nome)}</b>` : ''}</span>`;
 
   /* ---- Visitas ---- */
   document.getElementById('listaVisitas').innerHTML = (visitas||[]).length===0
