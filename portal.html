@@ -92,6 +92,14 @@
   .fin-resumo p:last-child{font-size:14px;font-weight:600;margin:0;}
   .parcela-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--paper);font-size:13px;}
   .parcela-row:last-child{border-bottom:none;}
+  .arquivo-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--paper);text-decoration:none;color:var(--ink);}
+  .arquivo-row:last-child{border-bottom:none;}
+  .arquivo-row:hover .arquivo-nome{color:var(--terracotta);}
+  .arquivo-tipo{flex-shrink:0;width:40px;height:40px;border-radius:9px;background:var(--paper);display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;color:var(--graphite);text-transform:uppercase;}
+  .arquivo-info{flex:1;min-width:0;}
+  .arquivo-nome{display:block;font-size:13.5px;font-weight:500;overflow-wrap:anywhere;}
+  .arquivo-meta{display:block;font-size:12px;color:var(--graphite);margin-top:2px;}
+  .arquivo-abrir{flex-shrink:0;font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;color:var(--terracotta);}
   .parcela-status{font-size:11px;padding:3px 9px;border-radius:99px;}
 
   /* Lista "Entregas" (miniatura + status + expandir) */
@@ -124,6 +132,13 @@ function fmtMoeda(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currenc
 function fmtDataHora(iso){
   const d = new Date(iso);
   return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+}
+
+function tipoArquivo(nome){
+  const ext = (String(nome||'').split('.').pop() || '').toLowerCase();
+  if(['jpg','jpeg','png','webp','gif','heic'].includes(ext)) return 'img';
+  if(['dwg','dxf','skp'].includes(ext)) return ext;
+  return ext && ext.length <= 4 ? ext : 'arq';
 }
 
 const STATUS_LABEL = { pendente:'Pendente', em_andamento:'Em andamento', concluida:'Concluída',
@@ -229,6 +244,23 @@ async function carregarERenderizar(){
             ${a.responsaveis ? `<p class="ata-campo"><b>Responsáveis:</b> ${esc(a.responsaveis)}</p>` : ''}
           </div>
         </details>`).join('')}
+    </div>` : ''}
+
+    ${(p.anexos||[]).length > 0 ? `
+    <div class="card">
+      <p class="label" style="margin-bottom:10px;">Arquivos do projeto</p>
+      ${p.anexos.map(a => {
+        const link = /^https?:\/\//i.test(a.url || '') ? `href="${esc(a.url)}" target="_blank" rel="noopener"` : '';
+        const data = a.criado_em ? new Date(a.criado_em).toLocaleDateString('pt-BR') : '';
+        return `<a class="arquivo-row" ${link}>
+          <span class="arquivo-tipo">${esc(tipoArquivo(a.nome_arquivo))}</span>
+          <span class="arquivo-info">
+            <span class="arquivo-nome">${esc(a.nome_arquivo)}</span>
+            <span class="arquivo-meta">${[a.etapa_nome, data].filter(Boolean).map(esc).join(' · ')}</span>
+          </span>
+          <span class="arquivo-abrir">Abrir ›</span>
+        </a>`;
+      }).join('')}
     </div>` : ''}
 
     ${(p.aprovacoes||[]).length > 0 ? `
